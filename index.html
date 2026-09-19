@@ -24,6 +24,47 @@ const __ANON = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJ
 const __SB = (typeof window.supabase !== "undefined") ? window.supabase.createClient(__URL, __ANON) : null;
 // Expose on window for browser console diagnostics
 if (typeof window !== "undefined") window.__SB = __SB;
+
+/* ---------- v7.51: optimistic-concurrency save (shared by every app) ----------
+   Each app keeps one JSON row per table. Before v7.51 every save was a blind upsert, so a stale
+   device (iMac left open all day) could overwrite everything a fresh device (iPad) had logged.
+   Now a save only lands if the row still carries the updated_at we last read. If another device
+   wrote first, the save is refused, the app reloads that device's copy and shows a toast; the
+   edit that was in flight on the stale device is dropped (one edit, not a day of logs).
+   expected: the updated_at we last read for this row; null = we believe the row does not exist. */
+window.__lcSave = async function (sb, table, id, state, expected) {
+  const updated_at = new Date().toISOString();
+  const conflict = async () => {
+    const { data: cur } = await sb.from(table).select("state, updated_at").eq("id", id).maybeSingle();
+    const e = new Error("Changed on another device"); e.code = "LC_CONFLICT"; e.row = cur || null; return e;
+  };
+  if (expected) {
+    const { data, error } = await sb.from(table).update({ state, updated_at }).eq("id", id).eq("updated_at", expected).select("updated_at");
+    if (error) throw error;
+    if (data && data.length) return updated_at;
+    const e = await conflict();
+    if (e.row) throw e;               // someone else wrote; caller reloads e.row
+    // row vanished — fall through and recreate it
+  } else if (expected === "") {
+    // row exists but has no updated_at (created by hand in SQL): claim it once, unconditionally
+    const { error } = await sb.from(table).update({ state, updated_at }).eq("id", id).is("updated_at", null);
+    if (error) throw error;
+    return updated_at;
+  }
+  const { error: insErr } = await sb.from(table).insert({ id, state, updated_at });
+  if (!insErr) return updated_at;
+  if (insErr.code === "23505") { const e = await conflict(); if (e.row) throw e; }
+  throw insErr;
+};
+/* small toast so a conflict reload is visible, whatever tab is open */
+window.__lcToast = function (msg, ms) {
+  try {
+    let el = document.getElementById("lc-toast");
+    if (!el) { el = document.createElement("div"); el.id = "lc-toast"; el.style.cssText = "position:fixed;left:50%;bottom:24px;transform:translateX(-50%);max-width:92vw;background:#211D17;color:#FBF7EE;font:12.5px 'Hanken Grotesk',sans-serif;padding:10px 14px;border-radius:10px;box-shadow:0 6px 24px rgba(0,0,0,.25);z-index:9999;opacity:0;transition:opacity .2s"; document.body.appendChild(el); }
+    el.textContent = msg; el.style.opacity = "1";
+    clearTimeout(el._t); el._t = setTimeout(() => { el.style.opacity = "0"; }, ms || 4000);
+  } catch (e) {}
+};
 window.__lcExportAll = function () {
   if (typeof XLSX === "undefined") { alert("Excel tools are still loading — give it a second and tap again."); return; }
   const wb = XLSX.utils.book_new();
@@ -44,7 +85,7 @@ const { useState, useEffect, useRef } = React;
     const SUPABASE_ANON  = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNsd2xuYnp4cmFpYXZwY2pidml5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQyMzg5NjksImV4cCI6MjA4OTgxNDk2OX0.-r80YRrZG2us0kQwFpo0IKbmYX45VsF8TFFnYPT3qsM";
     const TABLE         = "quick_log";
     const USER_KEY      = "linda";
-    const APP_VERSION   = "v7.50 · 2026-09-19";
+    const APP_VERSION   = "v7.51 · 2026-09-19";
     const TIME_ANALYZE_URL = "https://le-cadence-analyze.lesteps24.workers.dev/";
     const IDLE_GOAL_HRS = 1;   // target: no more than 1 hour of idle / TV per day
     const SESSION_TYPES = ["Study", "Class", "Quiz/Test", "Project", "Other"];
@@ -579,15 +620,16 @@ const { useState, useEffect, useRef } = React;
       return merged;
     }
 
+    let __seen;   // updated_at of the row as we last read it (v7.51 concurrency guard)
     async function dbLoad() {
       const { data, error } = await sb.from(TABLE).select("state, updated_at").eq("id", USER_KEY).maybeSingle();
       if (error) throw error;
+      __seen = data ? (data.updated_at || "") : null;
       return data;
     }
     async function dbSave(stateObj) {
-      const updated_at = new Date().toISOString();
-      const { error } = await sb.from(TABLE).upsert({ id: USER_KEY, state: stateObj, updated_at });
-      if (error) throw error;
+      const updated_at = await window.__lcSave(sb, TABLE, USER_KEY, stateObj, __seen);
+      __seen = updated_at;
       // cross-app: Health auto-checks the Reading habit from study time; Streaks refreshes its Study anchor
       try { window.dispatchEvent(new CustomEvent("lc:timeSaved")); window.dispatchEvent(new CustomEvent("lc:saved")); } catch (er) {}
       return updated_at;
@@ -766,7 +808,14 @@ const { useState, useEffect, useRef } = React;
         if (saveTimer.current) clearTimeout(saveTimer.current);
         saveTimer.current = setTimeout(async () => {
           try { const ts = await dbSave(state); lastSynced.current = ts; dirty.current = false; setStatus("synced"); }
-          catch (e) { console.error("save failed", e); setStatus("error"); }
+          catch (e) {
+            if (e && e.code === "LC_CONFLICT" && e.row) {   // another device wrote first — take its copy
+              skipSave.current = true; setState(hydrate(e.row.state)); lastSynced.current = e.row.updated_at || ""; __seen = lastSynced.current; dirty.current = false; setStatus("synced");
+              window.__lcToast("Time: updated on another device — reloaded. Your last change here was not saved.");
+              return;
+            }
+            console.error("save failed", e); setStatus("error");
+          }
         }, 700);
       }, [state]);
 
@@ -1177,6 +1226,7 @@ const { useState, useEffect, useRef } = React;
       const cadLoaded = useRef(false);
       const cadSkipSave = useRef(false);
       const cadSaveTimer = useRef(null);
+      const cadSeen = useRef(undefined);   // v7.51 concurrency guard for the workspace row
       useEffect(() => {
         (async () => {
           if (!CONFIGURED || !session || cadLoaded.current) return;
@@ -1184,6 +1234,7 @@ const { useState, useEffect, useRef } = React;
           try {
             const { data, error } = await sb.from(CAD_TABLE).select("state, updated_at").eq("id", USER_KEY).maybeSingle();
             if (error) throw error;
+            cadSeen.current = data ? (data.updated_at || "") : null;
             cadSkipSave.current = true;
             setCad(data && data.state ? { ...CAD_EMPTY, ...data.state } : { ...CAD_EMPTY });
             setCadStatus("synced");
@@ -1201,10 +1252,16 @@ const { useState, useEffect, useRef } = React;
         if (cadSaveTimer.current) clearTimeout(cadSaveTimer.current);
         cadSaveTimer.current = setTimeout(async () => {
           try {
-            const { error } = await sb.from(CAD_TABLE).upsert({ id: USER_KEY, state: cad, updated_at: new Date().toISOString() });
-            if (error) throw error;
+            cadSeen.current = await window.__lcSave(sb, CAD_TABLE, USER_KEY, cad, cadSeen.current);
             setCadStatus("synced");
-          } catch (e) { setCadStatus("error:Not saved — workspace table missing or unreachable. Run the migration SQL, then reload."); }
+          } catch (e) {
+            if (e && e.code === "LC_CONFLICT" && e.row) {
+              cadSeen.current = e.row.updated_at || ""; cadSkipSave.current = true; setCad({ ...CAD_EMPTY, ...(e.row.state || {}) }); setCadStatus("synced");
+              window.__lcToast("Workspace: updated on another device — reloaded. Your last change here was not saved.");
+              return;
+            }
+            setCadStatus("error:Not saved — workspace table missing or unreachable. Run the migration SQL, then reload.");
+          }
         }, 900);
         return () => { if (cadSaveTimer.current) clearTimeout(cadSaveTimer.current); };
       }, [cad]);
@@ -5167,7 +5224,7 @@ const { useState, useEffect, useRef } = React;
     const TABLE         = "hundred_days";
     const USER_KEY      = "linda";              // any fixed label; names your single saved row
     const ANALYZE_URL   = "https://hundred-days-analyze.lesteps24.workers.dev/";                   // your trends Worker
-    const APP_VERSION   = "v3.93 · 2026-09-15";  // bump this each update so you can confirm a deploy
+    const APP_VERSION   = "v3.94 · 2026-09-19";  // bump this each update so you can confirm a deploy
     const DEMO_URL      = "https://www.instagram.com/reel/DWACMUODNN1/";  // Movement routine demo
     /* ============================================================ */
 
@@ -5550,15 +5607,16 @@ const { useState, useEffect, useRef } = React;
       return merged;
     }
 
+    let __seen;   // updated_at of the row as we last read it (v7.51 concurrency guard)
     async function dbLoad() {
       const { data, error } = await sb.from(TABLE).select("state, updated_at").eq("id", USER_KEY).maybeSingle();
       if (error) throw error;
+      __seen = data ? (data.updated_at || "") : null;
       return data; // null OR { state, updated_at }
     }
     async function dbSave(stateObj) {
-      const updated_at = new Date().toISOString();
-      const { error } = await sb.from(TABLE).upsert({ id: USER_KEY, state: stateObj, updated_at }, { onConflict: "id" });
-      if (error) throw error;
+      const updated_at = await window.__lcSave(sb, TABLE, USER_KEY, stateObj, __seen);
+      __seen = updated_at;
       return updated_at;
     }
 
@@ -6048,6 +6106,11 @@ const { useState, useEffect, useRef } = React;
             dirty.current = false;
             setStatus("synced");
           } catch (e) {
+            if (e && e.code === "LC_CONFLICT" && e.row) {   // another device wrote first — take its copy
+              skipSave.current = true; setState(hydrate(e.row.state)); lastSynced.current = e.row.updated_at || ""; __seen = lastSynced.current; dirty.current = false; setStatus("synced");
+              window.__lcToast("Health: updated on another device — reloaded. Your last change here was not saved.");
+              return;
+            }
             console.error("Supabase save failed:", e);
             setStatus("error");
           }
@@ -6060,7 +6123,8 @@ const { useState, useEffect, useRef } = React;
           if (!e || e.detail === "health") return;
           if (saveTimer.current) clearTimeout(saveTimer.current);
           if (dirty.current) {
-            dbSave(state).then((ts) => { lastSynced.current = ts; dirty.current = false; setStatus("synced"); try { window.dispatchEvent(new CustomEvent("lc:saved")); } catch (er) {} }).catch(() => {});
+            dbSave(state).then((ts) => { lastSynced.current = ts; dirty.current = false; setStatus("synced"); try { window.dispatchEvent(new CustomEvent("lc:saved")); } catch (er) {} })
+              .catch((e) => { if (e && e.code === "LC_CONFLICT" && e.row) { skipSave.current = true; setState(hydrate(e.row.state)); lastSynced.current = e.row.updated_at || ""; __seen = lastSynced.current; dirty.current = false; window.__lcToast("Health: updated on another device — reloaded. Your last change here was not saved."); } });
           } else { try { window.dispatchEvent(new CustomEvent("lc:saved")); } catch (er) {} }
         };
         window.addEventListener("lc:tab", onTab);
@@ -10004,7 +10068,7 @@ const { useState, useEffect, useMemo, useRef } = React;
   const ANALYZE_URL   = "https://muse-analyze.lesteps24.workers.dev/";
   // Vision extractor that reads the 5 EEG band values off a chart screenshot. Deploy muse-bands, paste URL.
   const MUSE_BANDS_URL = "";   // e.g. "https://muse-bands.lesteps24.workers.dev/"
-  const APP_VERSION   = "v1.14 · 2026-06-16";
+  const APP_VERSION   = "v1.15 · 2026-09-19";
 
   /* ---------- palette (matches Le Cadence) ---------- */
   const C = {
@@ -10110,10 +10174,12 @@ const { useState, useEffect, useMemo, useRef } = React;
     try { localStorage.removeItem(LS_BACKUP_KEY); } catch (_) {}
   }
 
+  let __seen;   // updated_at of the row as we last read it (v7.51 concurrency guard)
   async function dbLoad() {
     if (!sb) return null;
     const { data, error } = await sb.from(TABLE).select("state, updated_at").eq("id", USER_KEY).maybeSingle();
     if (error) throw error;
+    __seen = data ? (data.updated_at || "") : null;
     return data;
   }
   async function dbSave(stateObj) {
@@ -10121,16 +10187,9 @@ const { useState, useEffect, useMemo, useRef } = React;
     // even if the network write fails or the page is closed mid-flight.
     writeLocalBackup(stateObj);
     if (!sb) return null;
-    const updated_at = new Date().toISOString();
-    // .select() returns the affected row(s). If RLS is silently filtering writes,
-    // data will be empty even though error is null — surface this clearly.
-    const { data, error } = await sb.from(TABLE)
-      .upsert({ id: USER_KEY, state: stateObj, updated_at }, { onConflict: "id" })
-      .select();
-    if (error) throw error;
-    if (!data || data.length === 0) {
-      throw new Error("Write returned 0 rows — Row Level Security may be blocking writes to the muse table. Disable RLS or add a permissive policy.");
-    }
+    // v7.51: conditional write — refused (LC_CONFLICT) if another device saved since we last read
+    const updated_at = await window.__lcSave(sb, TABLE, USER_KEY, stateObj, __seen);
+    __seen = updated_at;
     // cross-app: let Health (Deep-breathing auto-check) and Streaks refresh their Muse read
     try { window.dispatchEvent(new CustomEvent("lc:museSaved")); window.dispatchEvent(new CustomEvent("lc:saved")); } catch (er) {}
     return updated_at;
@@ -10398,7 +10457,14 @@ const { useState, useEffect, useMemo, useRef } = React;
           const ts = await dbSave(state);
           lastSynced.current = ts || lastSynced.current;
           setStatus("synced");
-        } catch (e) { console.error(e); setStatus("error"); }
+        } catch (e) {
+          if (e && e.code === "LC_CONFLICT" && e.row) {   // another device wrote first — take its copy
+            skipNextSave.current = true; setState({ ...defaultState(), ...(e.row.state || {}) }); lastSynced.current = e.row.updated_at || ""; __seen = lastSynced.current; setStatus("synced");
+            window.__lcToast("Muse: updated on another device — reloaded. Your last change here was not saved.");
+            return;
+          }
+          console.error(e); setStatus("error");
+        }
       }, 600);
       return () => { if (saveTimer.current) clearTimeout(saveTimer.current); };
     }, [state, loading]);
@@ -10554,6 +10620,7 @@ const { useState, useEffect, useMemo, useRef } = React;
           lastSynced.current = ts || lastSynced.current;
           setStatus("synced");
         } catch (saveErr) {
+          if (saveErr && saveErr.code === "LC_CONFLICT" && saveErr.row) { skipNextSave.current = true; setState({ ...defaultState(), ...(saveErr.row.state || {}) }); lastSynced.current = saveErr.row.updated_at || ""; __seen = lastSynced.current; setStatus("synced"); window.__lcToast("Muse: updated on another device — reloaded. Your last change here was not saved."); return; }
           console.error("Regenerate save failed:", saveErr);
           skipNextSave.current = false; // let the debounce retry
           setStatus("error");
@@ -10794,6 +10861,7 @@ const { useState, useEffect, useMemo, useRef } = React;
           lastSynced.current = ts || lastSynced.current;
           setStatus("synced");
         } catch (saveErr) {
+          if (saveErr && saveErr.code === "LC_CONFLICT" && saveErr.row) { skipNextSave.current = true; setState({ ...defaultState(), ...(saveErr.row.state || {}) }); lastSynced.current = saveErr.row.updated_at || ""; __seen = lastSynced.current; setStatus("synced"); window.__lcToast("Muse: updated on another device — reloaded. Your last change here was not saved."); return; }
           console.error("Trend analysis save failed:", saveErr);
           skipNextSave.current = false;
           setStatus("error");
@@ -11125,6 +11193,7 @@ const { useState, useEffect, useMemo, useRef } = React;
         setStatus("synced");
         setSavedMsg(editing ? "Updated ✓" : "Saved ✓");
       } catch (e) {
+        if (e && e.code === "LC_CONFLICT" && e.row) { skipNextSave.current = true; setState({ ...defaultState(), ...(e.row.state || {}) }); lastSynced.current = e.row.updated_at || ""; __seen = lastSynced.current; setStatus("synced"); window.__lcToast("Muse: updated on another device — reloaded. Your last change here was not saved."); setSaving(false); return; }
         console.error("Immediate save failed:", e);
         setStatus("error");
         skipNextSave.current = false; // let the debounce retry
@@ -11409,7 +11478,7 @@ const ConsistencyApp = (function () {
     faint: "#CFC4AE", line: "#DCD2BD", ember: "#C8492A", emberDk: "#A1391F",
     sage: "#5C7150", navy: "#1E2A4A", gold: "#C9A227",
   };
-  const APP_VERSION = "v1.30 · 2026-09-06";
+  const APP_VERSION = "v1.31 · 2026-09-19";
   // Cross-database AI insights. Deploy the cadence-insights Worker, then paste its URL here.
   const INSIGHTS_URL = "https://cadence-insights.lesteps24.workers.dev/";
 
@@ -11492,17 +11561,17 @@ const ConsistencyApp = (function () {
   const ID = "linda_consistency";   // own row, never collides with The Hundred Days ("linda")
   const HEALTH_ID = "linda";        // read-only: pull Withings weight from here
 
+  let __seen;   // updated_at of the row as we last read it (v7.51 concurrency guard)
   async function dbLoad() {
     if (!sb) return null;
-    const { data, error } = await sb.from(TABLE).select("state").eq("id", ID).maybeSingle();
+    const { data, error } = await sb.from(TABLE).select("state, updated_at").eq("id", ID).maybeSingle();
     if (error) throw error;
+    __seen = data ? (data.updated_at || "") : null;
     return data ? data.state : null;
   }
   async function dbSave(state) {
     if (!sb) return;
-    const updated_at = new Date().toISOString();
-    const { error } = await sb.from(TABLE).upsert({ id: ID, state, updated_at });
-    if (error) throw error;
+    __seen = await window.__lcSave(sb, TABLE, ID, state, __seen);
   }
   /* ---------- cross-database metric helpers ---------- */
   const daysAgo = (d) => (parse(todayStr()) - parse(d)) / 86400000;
@@ -11879,7 +11948,14 @@ const ConsistencyApp = (function () {
       if (loading || !state) return;
       if (firstLoad.current) { firstLoad.current = false; return; }
       clearTimeout(saveTimer.current);
-      saveTimer.current = setTimeout(() => { dbSave(state).catch(() => {}); }, 700);
+      saveTimer.current = setTimeout(() => {
+        dbSave(state).catch((e) => {
+          if (e && e.code === "LC_CONFLICT" && e.row) {   // another device wrote first — take its copy
+            __seen = e.row.updated_at || ""; firstLoad.current = true; setState(e.row.state && e.row.state.log ? e.row.state : { log: {}, v: 1 });
+            window.__lcToast("Streaks: updated on another device — reloaded. Your last change here was not saved.");
+          }
+        });
+      }, 700);
     }, [state, loading]);
 
     if (loading || !state) {
@@ -12474,7 +12550,7 @@ const PracticeApp = (function () {
   };
   const TABLE = "practice_studio";
   const USER_KEY = "linda";
-  const APP_VERSION = "v3.0 · i2i · 2026-09-10";
+  const APP_VERSION = "v3.1 · i2i · 2026-09-19";
   // Deploy cadence-practice-worker.js as a Cloudflare Worker (same pattern as cadence-insights),
   // set the ANTHROPIC_API_KEY secret, then paste the deployed URL here.
   const WORKER_URL = "https://cadence-practice.lesteps24.workers.dev/";
@@ -12484,15 +12560,16 @@ const PracticeApp = (function () {
 
   function defaultState() { return { sessions: [], drafts: {}, scenarios: [] }; }
 
+  let __seen;   // updated_at of the row as we last read it (v7.51 concurrency guard)
   async function dbLoad() {
     const { data, error } = await sb.from(TABLE).select("state, updated_at").eq("id", USER_KEY).maybeSingle();
     if (error) throw error;
+    __seen = data ? (data.updated_at || "") : null;
     return data;
   }
   async function dbSave(stateObj) {
-    const updated_at = new Date().toISOString();
-    const { error } = await sb.from(TABLE).upsert({ id: USER_KEY, state: stateObj, updated_at }, { onConflict: "id" });
-    if (error) throw error;
+    const updated_at = await window.__lcSave(sb, TABLE, USER_KEY, stateObj, __seen);
+    __seen = updated_at;
     return updated_at;
   }
 
@@ -12759,7 +12836,15 @@ const PracticeApp = (function () {
       if (saveTimer.current) clearTimeout(saveTimer.current);
       saveTimer.current = setTimeout(async () => {
         setStatus("saving");
-        try { await dbSave(state); setStatus("synced"); setSaveErr(""); } catch (e) { console.error(e); setStatus("error"); setSaveErr((e && (e.message || e.details || e.hint)) || String(e)); }
+        try { await dbSave(state); setStatus("synced"); setSaveErr(""); }
+        catch (e) {
+          if (e && e.code === "LC_CONFLICT" && e.row) {   // another device wrote first — take its copy
+            firstLoad.current = true; setState({ ...defaultState(), ...(e.row.state || {}) }); setStatus("synced"); setSaveErr("");
+            window.__lcToast("Practice: updated on another device — reloaded. Your last change here was not saved.");
+            return;
+          }
+          console.error(e); setStatus("error"); setSaveErr((e && (e.message || e.details || e.hint)) || String(e));
+        }
       }, 600);
       return () => { if (saveTimer.current) clearTimeout(saveTimer.current); };
     }, [state, loading]);
