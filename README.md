@@ -28,7 +28,7 @@ _headers        Cloudflare cache rules (index.html never cached)
 ## Smoke test after every deploy
 
 - [ ] Version string in the Time footer matches CHANGELOG
-- [ ] Open each tab once (Time, Study, Health, Muse, Streaks, Practice); no blank screen
+- [ ] Open each tab once (Today, Time, Study, Health, Muse, Streaks, Practice); no blank screen
 - [ ] Log one water entry in Health; reload; it persists
 - [ ] Passcode unlocks Practice
 - [ ] Dock app icon and iPad icon still show

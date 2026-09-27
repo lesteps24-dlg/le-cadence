@@ -4,6 +4,41 @@ Shell version is `APP_VERSION` near the top of `index.html` (inside QuickLogApp)
 `APP_VERSION`: Health, Muse, Streaks (ConsistencyApp), Practice. Bump the shell on every deploy; bump an app's
 version only when that app changed.
 
+## v7.56 — 2026-09-27 (Today v1.2)
+- Today: link row under the header — **Inspiration · week by week (OneNote)**. More links go in `TODAY_LINKS`
+  near the top of the Today app, one `[label, url]` per line.
+
+## v7.55 — 2026-09-27 (Today v1.1)
+
+- **Today: four more counted steps** — Fast (≥ the Health fasting goal, computed from last night's stop time
+  and this morning's start time; the habit tick counts as fallback), Supplements (all listed taken),
+  Whole foods all day with no sugar (all three meal flags, or the habit tick), Invisalign (hours vs goal,
+  same math as the Invisalign tab). All four are core: they make or break the run.
+- **Study bar raised to 2 h on the timer** (stretch 3 h shown in the detail). The step ticks at 120 min.
+- **Run counts from Sept 28** (`RUN_FROM`) — Linda's reset. Earlier days are ignored, nothing deleted.
+- Core steps are now: weigh · fast · water · supplements · 2 h study · dinner · stop time · whole foods ·
+  Invisalign. Optional (never break the run): lunch, question set, flashcards, the read-only visits.
+
+No schema change. Nothing removed, nothing renamed.
+
+## v7.54 — 2026-09-27 (Today v1.0)
+
+- **New Today tab — the daily routine, verified by the app.** First tab and the default landing. Morning /
+  Noon / Evening (and Sunday) steps from the routine doc, each ticked from entries that already exist:
+  Withings weigh-in, water tap, lunch, study timer (minutes + subject), question set + tagged misses,
+  flashcards reviewed, dinner, stopped-eating time; on Sundays also next week's schedule and a look at
+  Streaks. Read-only steps ("Read Health → Today") only know that the tab was opened today. Tap any step to
+  jump to its screen. A **Next** card names the first undone step. The header shows done / to go and a
+  **run** of consecutive days where the five core steps (weigh · water · timer · dinner · stop time) were
+  all met — derived from history, never stored, so it can't be gamed or lost.
+- Reads `hundred_days` and `quick_log` directly; refreshes when any app saves. Nothing new stored except
+  a per-day "visited" stamp in the browser and a per-day flashcard review count in `quick_log`
+  (`study.flashcardDrill`), written by the Flashcards tab.
+- New `lc:view` event lets the shell open a specific Health view or Study chip (used by the step links).
+- This is the first draft of the single cross-app Today from the Nov 15 spec, built where it will be used.
+
+No schema change. Nothing removed, nothing renamed.
+
 ## v7.53 — 2026-09-27 (Health v3.97)
 
 - **Provenance labels on habits.** Every habit row on Health → Today now says *why* it's ticked, derived at

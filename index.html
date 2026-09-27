@@ -85,7 +85,7 @@ const { useState, useEffect, useRef } = React;
     const SUPABASE_ANON  = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNsd2xuYnp4cmFpYXZwY2pidml5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQyMzg5NjksImV4cCI6MjA4OTgxNDk2OX0.-r80YRrZG2us0kQwFpo0IKbmYX45VsF8TFFnYPT3qsM";
     const TABLE         = "quick_log";
     const USER_KEY      = "linda";
-    const APP_VERSION   = "v7.53 · 2026-09-27";
+    const APP_VERSION   = "v7.56 · 2026-09-27";
     const TIME_ANALYZE_URL = "https://le-cadence-analyze.lesteps24.workers.dev/";
     const IDLE_GOAL_HRS = 1;   // target: no more than 1 hour of idle / TV per day
     const SESSION_TYPES = ["Study", "Class", "Quiz/Test", "Project", "Other"];
@@ -738,6 +738,7 @@ const { useState, useEffect, useRef } = React;
       const [pmpTab, setPmpTab] = useState("hq");        // inside PMP: hq | plan
       const [studyMore, setStudyMore] = useState(false); // reveal secondary tools row
       const [pmpView, setPmpView] = useState("overview");
+      useEffect(() => { const h = (e) => { const d = e && e.detail; if (!d || d.app !== "study") return; if (d.view) setStudySub(d.view); if (d.sub) { setPmpTab("hq"); setPmpView(d.sub); } }; window.addEventListener("lc:view", h); return () => window.removeEventListener("lc:view", h); }, []);
       const [pmpQd, setPmpQd] = useState({});   // practice-set draft
       const [pmpMd, setPmpMd] = useState({});   // mock draft
       const [pmpEd, setPmpEd] = useState({});   // error draft
@@ -1036,7 +1037,8 @@ const { useState, useEffect, useRef } = React;
       });
       const setFlashcardMastery = (subjectId, cardId, mastered) => setState((s) => {
         const deck = (s.study.flashcardDecks && s.study.flashcardDecks[subjectId]) || [];
-        return { ...s, study: { ...s.study, flashcardDecks: { ...(s.study.flashcardDecks || {}), [subjectId]: deck.map((c) => c.id === cardId ? { ...c, mastered, missed: !mastered } : c) } } };
+        const t = todayStr(); const drill = { ...(s.study.flashcardDrill || {}), [t]: ((s.study.flashcardDrill || {})[t] || 0) + 1 };   // v7.54: per-day review count for the Today checklist
+        return { ...s, study: { ...s.study, flashcardDrill: drill, flashcardDecks: { ...(s.study.flashcardDecks || {}), [subjectId]: deck.map((c) => c.id === cardId ? { ...c, mastered, missed: !mastered } : c) } } };
       });
       const setPmpNote = (label, text) => setState((s) => ({ ...s, study: { ...s.study, pmpNotes: { ...(s.study.pmpNotes || {}), [label]: text } } }));
       const [pmpReflow, setPmpReflow] = useState(null); // { [weekLabel]: adjustedTarget } — null = use PMP_WEEKS defaults
@@ -5735,6 +5737,7 @@ const { useState, useEffect, useRef } = React;
       const [status, setStatus] = useState(CONFIGURED ? "loading" : "demo");
       const [view, setView] = useState("today");
       const lastSource = useRef("withings");   // which device tab the Sources chip opens
+      useEffect(() => { const h = (e) => { const d = e && e.detail; if (d && d.app === "health" && d.view) { if (HEALTH_SOURCES.some(([k]) => k === d.view)) lastSource.current = d.view; setView(d.view); } }; window.addEventListener("lc:view", h); return () => window.removeEventListener("lc:view", h); }, []);
       useEffect(() => { if (state && (state.hiddenViews || []).includes(view)) setView("today"); }, [state && state.hiddenViews, view]);
       const [ouraSyncing, setOuraSyncing] = useState(false);
       const [ouraMsg, setOuraMsg] = useState("");
@@ -13427,6 +13430,223 @@ const PracticeApp = (function () {
   return App;
 })();
 
+/* ============================================================================
+   TODAY — the daily routine as a checklist the app verifies itself (v7.54).
+   Reads the same Supabase rows the other apps write (hundred_days, quick_log) and
+   derives every tick from entries that already exist. Nothing new is stored except
+   a per-day "visited" stamp in localStorage for the read-only steps and a per-day
+   flashcard-drill stamp in quick_log (set by the Flashcards tab).
+   This is the first draft of the single cross-app Today from the Nov 15 spec.
+   ============================================================================ */
+const TodayApp = (function () {
+  const { useState, useEffect, useRef } = React;
+  const sb = (typeof window !== "undefined" && window.__SB) ? window.__SB : null;
+  const APP_VERSION = "v1.2 · 2026-09-27";
+  const RUN_FROM = "2026-09-28";        // the run counts from this day — Linda's reset for Sept 28
+  const STUDY_TARGET_MIN = 120;         // 2 h/day is the bar; 3 h is the stretch shown in the detail
+  const STUDY_STRETCH_MIN = 180;
+  // Links shown under the header. Add a line per link: [label, url].
+  const TODAY_LINKS = [
+    ["Inspiration · week by week (OneNote)", "https://onedrive.live.com/view.aspx?resid=FAE135EBEA974E3%21sf33f54ab1b7c4563afe6555df607bca9&id=documents&wd=target%28Health.one%7C4D9AC4E4-BA49-41B6-85A1-36C09449A12E%2FInspiration%7C2C8C932F-E0E8-421A-88A3-F1839A62CD13%2F%29&wdpartid=%7b4BE50D95-FC6C-402B-BF72-D09A20CFB50C%7d%7b1%7d&wdsectionfileid=FAE135EBEA974E3!s31c4a313d4784764848a27779fdb2b94&end"],
+  ];
+  const C = { bg: "#EFE7D6", paper: "#FBF7EE", ink: "#211D17", soft: "#7A6F5E", faint: "#CFC4AE", line: "#DCD2BD", sage: "#5F6F52", ember: "#C8492A", amber: "#A9822F" };
+  const pad = (n) => String(n).padStart(2, "0");
+  const toStr = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  const todayStr = () => toStr(new Date());
+  const addDays = (ds, n) => { const [y, m, d] = ds.split("-").map(Number); const x = new Date(y, m - 1, d + n); return toStr(x); };
+  const dowOf = (ds) => { const [y, m, d] = ds.split("-").map(Number); return new Date(y, m - 1, d).getDay(); };
+  const DOW = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+  const visits = () => { try { return JSON.parse(window.localStorage.getItem("lc_visits") || "{}"); } catch (e) { return {}; } };
+  const visited = (ds, tab) => !!((visits()[ds] || {})[tab]);
+
+  /* ---- derive the day's facts from the two rows ---- */
+  function facts(ds, hd, ql) {
+    hd = hd || {}; ql = ql || {}; const st = ql.study || {};
+    const w = ((hd.withings && hd.withings.days) || []).find((d) => d.day === ds) || null;
+    const water = ((hd.waterLog || {})[ds] || []);
+    const waterOz = water.reduce((a, e) => a + (Number(e.oz) || 0), 0);
+    const nut = (hd.nutritionLog || {})[ds] || {};
+    const sessions = (st.sessions || []).filter((x) => x && x.start && toStr(new Date(x.start)) === ds);
+    const studyMin = Math.round(sessions.reduce((a, x) => a + (x.secs || 0), 0) / 60);
+    const subjName = (id) => ((st.subjects || []).find((s) => s.id === id) || {}).name || "";
+    const subjects = [...new Set(sessions.map((x) => subjName(x.subjectId)).filter(Boolean))];
+    const P = st.pmp || {};
+    const errs = (P.errors || []).filter((e) => e && e.date === ds).length;
+    const qsets = (P.qlog || []).filter((q) => q && q.date === ds);
+    const drilled = ((st.flashcardDrill || {})[ds]) || 0;
+    const plan = (hd.workoutPlan || ["cardio", "lift", "cardio", "lift", "cardio", "lift", "cardio"])[dowOf(ds)] || "rest";
+    // next week's schedule set? any planDay override dated in the coming Mon..Sun
+    const nextMon = addDays(ds, ((8 - dowOf(ds)) % 7) || 7);
+    const nextWeekPlanned = Object.keys(st.planDay || {}).some((d) => d >= nextMon && d <= addDays(nextMon, 6) && Object.keys(st.planDay[d] || {}).length);
+    // whole foods / fasting: same test the Health auto-check uses, plus the habit tick as a manual fallback
+    const habits = hd.habits || []; const comp = (hd.completions || {})[ds] || {};
+    const hid = (re) => (habits.find((h) => re.test(h.name || "")) || {}).id;
+    const wholeAll = !!(nut.bWhole && nut.lWhole && nut.dWhole && !nut.sugar);
+    const wholeN = ["bWhole", "lWhole", "dWhole"].filter((k) => nut[k]).length;
+    const minOf = (t) => { if (!t || String(t).indexOf(":") < 0) return null; const [h, m] = String(t).split(":").map(Number); return h * 60 + m; };
+    const fa = minOf(nut.stoppedPrev), fb = minOf(nut.startedToday);
+    let fastMin = null; if (fa != null && fb != null) { fastMin = (fb + 1440) - fa; if (fastMin >= 1440) fastMin -= 1440; }
+    const fastGoal = (hd.fastHabitGoalHrs || 12) * 60;
+    const wholeDone = wholeAll || !!comp[hid(/whole\s*food/i)];
+    const fastDone = (fastMin != null && fastMin >= fastGoal) || !!comp[hid(/fast/i)];
+    // invisalign: hours worn vs goal (events or manual hours), same math as the Invisalign tab
+    const inv = (hd.invisalign || {})[ds] || null;
+    let invHrs = 0; if (inv) { if (inv.hours !== "" && inv.hours != null && !isNaN(parseFloat(inv.hours))) invHrs = parseFloat(inv.hours); else { let tot = 0, o = null; (inv.events || []).forEach((e) => { if (e.type === "in") o = e.t; else if (e.type === "out" && o != null) { tot += e.t - o; o = null; } }); if (o != null && ds === todayStr()) tot += Date.now() - o; invHrs = tot / 3600000; } }
+    const invGoal = hd.invisGoal || 20;
+    // supplements: all listed taken
+    const supps = hd.supplements || []; const sl = (hd.supplementLog || {})[ds] || {};
+    const suppN = supps.filter((x) => sl[x.id]).length;
+    return { wholeDone, wholeAll, wholeN, sugar: !!nut.sugar, fastDone, fastMin, fastGoal, invHrs, invGoal, invAny: !!inv, suppN, suppTotal: supps.length, weight: w && w.weight != null ? w.weight : null, steps: w && w.steps != null ? w.steps : null, waterOz, waterN: water.length,
+      lunch: !!(nut.lunch || nut.lFood), lunchTxt: nut.lFood || nut.lunch || "", dinner: !!(nut.dinner || nut.dFood), dinnerTxt: nut.dFood || nut.dinner || "",
+      stopped: nut.stoppedTonight || "", studyMin, subjects, errs, qsets: qsets.length, drilled, plan, nextWeekPlanned, weightUnit: hd.weightUnit || "lb" };
+  }
+
+  /* ---- the routine, as steps. `core` steps make up the daily run. ---- */
+  function steps(ds, f) {
+    const sunday = dowOf(ds) === 0;
+    const planTxt = f.plan === "rest" ? "Rest day" : f.plan === "both" ? "Lift + cardio" : f.plan === "lift" ? "Lift" : "Cardio";
+    const S = [];
+    S.push({ block: "Morning", id: "weigh", label: "Step on the Withings scale", core: true, done: f.weight != null, detail: f.weight != null ? `${f.weight} ${f.weightUnit} synced` : "waiting for Withings", go: ["health", "withings"] });
+    S.push({ block: "Morning", id: "read", label: `Read Health → Today (${planTxt})`, core: false, done: visited(ds, "health"), detail: visited(ds, "health") ? "opened today" : "read only — plan banner and This Week card", go: ["health", "today"] });
+    S.push({ block: "Morning", id: "water", label: "Tap water once", core: true, done: f.waterN > 0, detail: f.waterN ? `${Math.round(f.waterOz)} oz · ${f.waterN} tap${f.waterN > 1 ? "s" : ""}` : "", go: ["health", "water"] });
+    S.push({ block: "Noon", id: "lunch", label: "Log lunch (Same as yesterday if it repeats)", core: false, optional: true, done: f.lunch, detail: f.lunch ? f.lunchTxt.slice(0, 40) : "optional", go: ["health", "nutrition"] });
+    S.push({ block: "Morning", id: "fast", label: `Fast ${Math.round(f.fastGoal / 60)} h (from last night's stop time)`, core: true, done: f.fastDone, detail: f.fastMin != null ? `${Math.floor(f.fastMin / 60)}h ${f.fastMin % 60}m${f.fastDone ? "" : " · set 'started eating' when you break it"}` : "needs last night's stop time + today's start time", go: ["health", "nutrition"] });
+    S.push({ block: "Noon", id: "supps", label: "Supplements", core: true, done: f.suppTotal > 0 && f.suppN >= f.suppTotal, detail: f.suppTotal ? `${f.suppN} of ${f.suppTotal}` : "none listed in Health → Supplements", go: ["health", "supp"] });
+    const sh = Math.round(f.studyMin / 60 * 10) / 10;
+    S.push({ block: "Evening", id: "timer", label: `Study ${STUDY_TARGET_MIN / 60} h on the timer (stretch ${STUDY_STRETCH_MIN / 60} h)`, core: true, done: f.studyMin >= STUDY_TARGET_MIN, detail: f.studyMin ? `${f.studyMin} of ${STUDY_TARGET_MIN} min${f.studyMin >= STUDY_STRETCH_MIN ? " · stretch hit" : f.studyMin >= STUDY_TARGET_MIN ? ` · ${STUDY_STRETCH_MIN - f.studyMin} to stretch` : ""}${f.subjects.length ? " · " + f.subjects.join(", ") : ""}` : "", go: ["study", "dash"] });
+    S.push({ block: "Evening", id: "errors", label: "Log a question set + tag each miss", core: false, optional: true, done: f.qsets > 0 || f.errs > 0, detail: f.qsets || f.errs ? `${f.qsets} set${f.qsets === 1 ? "" : "s"} · ${f.errs} miss${f.errs === 1 ? "" : "es"} tagged` : "only if you did questions", go: ["study", "pmp", "errors"] });
+    S.push({ block: "Evening", id: "flash", label: "Flashcards to zero due", core: false, optional: true, done: f.drilled > 0, detail: f.drilled ? `${f.drilled} card${f.drilled === 1 ? "" : "s"} reviewed` : "", go: ["study", "flashcards"] });
+    S.push({ block: "Evening", id: "dinner", label: "Log dinner", core: true, done: f.dinner, detail: f.dinner ? f.dinnerTxt.slice(0, 40) : "", go: ["health", "nutrition"] });
+    S.push({ block: "Evening", id: "stop", label: "Set stopped-eating time", core: true, done: !!f.stopped, detail: f.stopped ? `${f.stopped} · drives tomorrow's fasting check` : "", go: ["health", "nutrition"] });
+    S.push({ block: "Evening", id: "whole", label: "Whole foods all day, no processed sugar", core: true, done: f.wholeDone, detail: f.wholeDone ? (f.wholeAll ? "all 3 meals whole" : "checked") : f.sugar ? "sugar logged today" : `${f.wholeN} of 3 meals flagged whole`, go: ["health", "nutrition"] });
+    S.push({ block: "Evening", id: "invis", label: `Invisalign ${f.invGoal} h`, core: true, done: f.invHrs >= f.invGoal, detail: f.invAny ? `${Math.round(f.invHrs * 10) / 10} h so far` : "no in/out logged today", go: ["health", "invis"] });
+    if (sunday) {
+      S.push({ block: "Sunday", id: "week", label: "Health → Week card: planned vs done", core: false, done: visited(ds, "health"), detail: visited(ds, "health") ? "opened today" : "", go: ["health", "today"] });
+      S.push({ block: "Sunday", id: "sched", label: "Set next week's study minutes", core: false, done: f.nextWeekPlanned, detail: f.nextWeekPlanned ? "next week has a plan" : "Study → Schedule grid", go: ["study", "schedule"] });
+      S.push({ block: "Sunday", id: "streak", label: "One look at Streaks", core: false, done: visited(ds, "streak"), detail: "", go: ["streak"] });
+    }
+    return S;
+  }
+
+  /* the run: consecutive days (ending today or yesterday) where every core step was met — derived, never stored */
+  function runLength(hd, ql) {
+    const t = todayStr();
+    const coreOk = (ds) => steps(ds, facts(ds, hd, ql)).filter((s) => s.core).every((s) => s.done);
+    let n = 0, cur = coreOk(t) ? t : addDays(t, -1);
+    if (cur < RUN_FROM || !coreOk(cur)) return 0;
+    while (cur >= RUN_FROM && coreOk(cur) && n < 400) { n++; cur = addDays(cur, -1); }
+    return n;
+  }
+
+  function Today({ active }) {
+    const [hd, setHd] = useState(null);
+    const [ql, setQl] = useState(null);
+    const [err, setErr] = useState("");
+    const [, tick] = useState(0);
+    const load = async () => {
+      if (!sb) { setErr("no database"); return; }
+      try {
+        const [a, b] = await Promise.all([
+          sb.from("hundred_days").select("state").eq("id", "linda").maybeSingle(),
+          sb.from("quick_log").select("state").eq("id", "linda").maybeSingle(),
+        ]);
+        setHd((a.data && a.data.state) || {}); setQl((b.data && b.data.state) || {}); setErr("");
+      } catch (e) { setErr("couldn't read — " + (e.message || e)); }
+    };
+    useEffect(() => { load(); }, []);
+    useEffect(() => { if (active) load(); }, [active]);
+    useEffect(() => {
+      const h = () => setTimeout(load, 900);   // let the other app's debounced save land first
+      const vis = () => { if (document.visibilityState === "visible" && active) load(); };
+      ["lc:saved", "lc:timeSaved", "lc:museSaved"].forEach((e) => window.addEventListener(e, h));
+      document.addEventListener("visibilitychange", vis);
+      const iv = setInterval(() => tick((x) => x + 1), 60000);   // re-evaluate visits / date rollover
+      return () => { ["lc:saved", "lc:timeSaved", "lc:museSaved"].forEach((e) => window.removeEventListener(e, h)); document.removeEventListener("visibilitychange", vis); clearInterval(iv); };
+    }, [active]);
+
+    const go = (path) => {
+      try { window.dispatchEvent(new CustomEvent("lc:goto", { detail: path[0] })); } catch (e) {}
+      if (path.length > 1) setTimeout(() => { try { window.dispatchEvent(new CustomEvent("lc:view", { detail: { app: path[0], view: path[1], sub: path[2] || null } })); } catch (e) {} }, 60);
+    };
+
+    const font = "'Hanken Grotesk', sans-serif", mono = "'DM Mono', monospace", serif = "'Fraunces', serif";
+    if (!hd || !ql) return <div style={{ maxWidth: 480, margin: "0 auto", padding: "60px 18px", textAlign: "center", fontFamily: mono, fontSize: 12, letterSpacing: 1, color: C.soft }}>{err || "reading today…"}</div>;
+
+    const ds = todayStr();
+    const f = facts(ds, hd, ql);
+    const S = steps(ds, f);
+    const doneAll = S.filter((s) => s.done).length;
+    const leftReq = S.filter((s) => !s.done && !s.optional).length;
+    const leftOpt = S.filter((s) => !s.done && s.optional).length;
+    const coreLeft = S.filter((s) => s.core && !s.done);
+    const run = runLength(hd, ql);
+    const next = S.find((s) => !s.done && !s.optional) || S.find((s) => !s.done);
+    const blocks = [...new Set(S.map((s) => s.block))];
+    const hour = new Date().getHours();
+    const nowBlock = hour < 11 ? "Morning" : hour < 16 ? "Noon" : "Evening";
+
+    const card = { background: C.paper, border: `1px solid ${C.line}`, borderRadius: 14, padding: "14px 14px", marginBottom: 12 };
+    return (
+      <div style={{ maxWidth: 480, margin: "0 auto", padding: "10px 16px 40px", fontFamily: font, color: C.ink }}>
+        <div style={{ ...card, display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 10 }}>
+          <div>
+            <div style={{ fontFamily: serif, fontSize: 22, lineHeight: 1.1 }}>{DOW[dowOf(ds)]}</div>
+            <div style={{ fontFamily: mono, fontSize: 11, color: C.soft, marginTop: 4 }}>{doneAll} done · {leftReq} to go{leftOpt ? ` (+${leftOpt} optional)` : ""}{run ? ` · ${run}-day run` : ""}</div>
+          </div>
+          <div style={{ textAlign: "right", fontFamily: mono, fontSize: 10.5, color: C.soft, lineHeight: 1.5 }}>
+            <div>{f.plan === "rest" ? "Rest day" : f.plan === "both" ? "Lift + cardio" : f.plan === "lift" ? "Lift day" : "Cardio day"}</div>
+            <div>{f.steps != null ? f.steps.toLocaleString() + " steps" : "steps: waiting"}</div>
+          </div>
+        </div>
+
+        {TODAY_LINKS.length ? (
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 6, margin: "-4px 0 12px" }}>
+            {TODAY_LINKS.map(([lbl, url]) => (
+              <a key={url} href={url} target="_blank" rel="noopener" style={{ fontFamily: mono, fontSize: 10.5, color: C.soft, textDecoration: "none", border: `1px solid ${C.line}`, borderRadius: 999, padding: "5px 10px", background: C.paper }}>✦ {lbl} ↗</a>
+            ))}
+          </div>
+        ) : null}
+        {next && (
+          <button onClick={() => go(next.go)} style={{ ...card, width: "100%", textAlign: "left", cursor: "pointer", borderColor: C.ink, display: "flex", alignItems: "center", gap: 10 }}>
+            <span style={{ fontFamily: mono, fontSize: 9.5, letterSpacing: 1.2, textTransform: "uppercase", color: C.soft }}>Next</span>
+            <span style={{ flex: 1, fontSize: 15, fontWeight: 700 }}>{next.label}</span>
+            <span style={{ fontFamily: mono, fontSize: 12, color: C.soft }}>→</span>
+          </button>
+        )}
+
+        {blocks.map((b) => {
+          const items = S.filter((s) => s.block === b);
+          const dn = items.filter((s) => s.done).length;
+          const isNow = b === nowBlock;
+          return (
+            <div key={b} style={card}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 6 }}>
+                <span style={{ fontFamily: mono, fontSize: 10, letterSpacing: 1.2, textTransform: "uppercase", color: isNow ? C.ink : C.soft, fontWeight: isNow ? 700 : 500 }}>{b}{isNow ? " · now" : ""}</span>
+                <span style={{ fontFamily: mono, fontSize: 10.5, color: dn === items.length ? C.sage : C.faint }}>{dn}/{items.length}</span>
+              </div>
+              {items.map((s) => (
+                <button key={s.id} onClick={() => go(s.go)} style={{ display: "flex", alignItems: "flex-start", gap: 10, width: "100%", textAlign: "left", background: "transparent", border: "none", borderTop: `1px solid ${C.bg}`, padding: "9px 2px", cursor: "pointer", fontFamily: font }}>
+                  <span style={{ width: 22, height: 22, borderRadius: 7, flexShrink: 0, marginTop: 1, border: `1.5px solid ${s.done ? C.sage : s.optional ? C.faint : C.line}`, background: s.done ? C.sage : "transparent", color: C.paper, fontSize: 13, display: "flex", alignItems: "center", justifyContent: "center" }}>{s.done ? "✓" : ""}</span>
+                  <span style={{ flex: 1, minWidth: 0 }}>
+                    <span style={{ display: "block", fontSize: 14.5, fontWeight: 600, color: s.done ? C.soft : C.ink, textDecoration: s.done ? "line-through" : "none", textDecorationColor: C.faint }}>{s.label}{s.optional && !s.done ? <span style={{ fontFamily: mono, fontSize: 9.5, color: C.faint, marginLeft: 6 }}>optional</span> : null}</span>
+                    {s.detail ? <span style={{ display: "block", fontFamily: mono, fontSize: 10, color: s.done ? C.sage : C.soft, marginTop: 2 }}>{s.detail}</span> : null}
+                  </span>
+                </button>
+              ))}
+            </div>
+          );
+        })}
+
+        <p style={{ fontFamily: mono, fontSize: 10, color: C.faint, textAlign: "center", lineHeight: 1.6, margin: "6px 0 0" }}>
+          Ticks come from your entries, not from this screen. Core steps (weigh · fast · water · supplements · 2 h study · dinner · stop time · whole foods · Invisalign) make the run, counted from Sept 28.<br />
+          Sleep, steps, HRV and workouts sync themselves — never listed here.<br />TODAY · {APP_VERSION}
+        </p>
+      </div>
+    );
+  }
+  return Today;
+})();
+
 async function lcSha256(txt) {
   const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode("cadence-practice:" + txt));
   return Array.from(new Uint8Array(buf)).map((b) => b.toString(16).padStart(2, "0")).join("");
@@ -13461,11 +13681,13 @@ function LockScreen({ onUnlock }) {
 }
 
 function Shell() {
-  let saved = "time";
-  try { saved = window.localStorage.getItem("lc_mode") || "time"; } catch (e) {}
-  const validModes = ["time", "study", "health", "muse", "streak", "practice"];
-  const [mode, setMode] = useState(validModes.indexOf(saved) >= 0 ? saved : "time");
-  const pick = (m) => { setMode(m); try { window.localStorage.setItem("lc_mode", m); } catch (e) {} try { window.dispatchEvent(new CustomEvent("lc:tab", { detail: m })); } catch (e) {} };
+  let saved = "today";
+  try { saved = window.localStorage.getItem("lc_mode") || "today"; } catch (e) {}
+  const validModes = ["today", "time", "study", "health", "muse", "streak", "practice"];
+  const [mode, setMode] = useState(validModes.indexOf(saved) >= 0 ? saved : "today");
+  const stampVisit = (m) => { try { const d = new Date(); const k = d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0"); const v = JSON.parse(window.localStorage.getItem("lc_visits") || "{}"); v[k] = { ...(v[k] || {}), [m]: true }; Object.keys(v).sort().slice(0, -14).forEach((old) => delete v[old]); window.localStorage.setItem("lc_visits", JSON.stringify(v)); } catch (e) {} };
+  const pick = (m) => { setMode(m); stampVisit(m); try { window.localStorage.setItem("lc_mode", m); } catch (e) {} try { window.dispatchEvent(new CustomEvent("lc:tab", { detail: m })); } catch (e) {} };
+  useEffect(() => { stampVisit(mode); }, []);   // the tab the app opened on counts as visited
   useEffect(() => { const h = (e) => { if (e && e.detail && validModes.indexOf(e.detail) >= 0) pick(e.detail); }; window.addEventListener("lc:goto", h); return () => window.removeEventListener("lc:goto", h); }, []);
   const [usage, setUsage] = useState(() => { try { return JSON.parse(window.localStorage.getItem("lc_usage") || "{}"); } catch (e) { return {}; } });
   const DEVICE = (() => { try { let d = window.localStorage.getItem("lc_device"); if (!d) { d = "d" + Math.random().toString(36).slice(2, 9); window.localStorage.setItem("lc_device", d); } return d; } catch (e) { return "d0"; } })();
@@ -13568,6 +13790,7 @@ function Shell() {
   return (<div>
     <div style={{ maxWidth: 480, margin: "0 auto", padding: "10px 16px 0" }}>
       <div id="lc-switch" style={{ display: "flex", flexWrap: "wrap", gap: 6, background: C.paper, border: "1px solid " + C.line, borderRadius: 13, padding: 4 }}>
+        <button onClick={() => pick("today")} style={seg(mode === "today")}>☀ Today</button>
         <button onClick={() => pick("time")} style={seg(mode === "time")}>⏱ Time</button>
         <button onClick={() => pick("study")} style={seg(mode === "study")}>📚 Study</button>
         <button onClick={() => pick("health")} style={seg(mode === "health")}>❤ Health</button>
@@ -13595,6 +13818,7 @@ function Shell() {
         </div>
       )}
     </div>
+    <div style={{ display: mode === "today" ? "block" : "none" }}><TodayApp active={mode === "today"} /></div>
     <div style={{ display: (mode === "time" || mode === "study") ? "block" : "none" }}><QuickLogApp navMode={mode} /></div>
     <div style={{ display: mode === "health" ? "block" : "none" }}><HealthApp /></div>
     <div style={{ display: mode === "muse" && !locked ? "block" : "none" }}><MuseApp /></div>
