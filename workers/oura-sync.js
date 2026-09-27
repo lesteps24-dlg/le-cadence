@@ -3,7 +3,7 @@
 // drop-in compatible with your Health app (same field names + many new ones).
 // Your Oura Personal Access Token stays here as a secret — never in the app.
 //
-// GET ?days=N  ->  { days: [ { day, sleepHours, timeInBed, deepMin, remMin, lightMin,
+// GET ?days=N  ->  { days: [ { day, sleepHours, timeInBed, deepMin, remMin, lightMin, bedStart, bedEnd,
 //                              awakeMin, efficiency, latencyMin, hrv, rhr, avgHr, breath,
 //                              sleepScore, readiness, tempDev, spo2, bdi,
 //                              stressMin, recoveryMin, stressSummary, resilience } ] }
@@ -78,6 +78,9 @@ export default {
       r.rhr = s.lowest_heart_rate != null ? s.lowest_heart_rate : null;
       r.avgHr = s.average_heart_rate != null ? Math.round(s.average_heart_rate) : null;
       r.breath = s.average_breath != null ? Math.round(s.average_breath * 10) / 10 : null;
+      // v2 (Sept 27): actual bed/wake times so the Time tab can place the sleep block where it really was
+      r.bedStart = s.bedtime_start || null;
+      r.bedEnd = s.bedtime_end || null;
     });
 
     (Array.isArray(dailySleep) ? dailySleep : []).forEach((d) => { if (d && d.day) row(d.day).sleepScore = d.score != null ? d.score : null; });
