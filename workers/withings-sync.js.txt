@@ -1,0 +1,308 @@
+/* ============================================================
+   Withings sync Worker for Le Cadence (Health side)
+   ------------------------------------------------------------
+   v4 · adds nighttime HRV (RMSSD) from the Sleep Analyzer mat.
+        Pulls from v2/sleep `get` endpoint (timeseries data) and
+        averages per-night.
+
+   Returns recent body measurements (weight, body-fat %, lean/
+   muscle mass, BP, heart rate) AND full Sleep Analyzer data
+   INCLUDING nightly HRV from the Withings API as JSON.
+
+   ============================================================
+   UPGRADE NOTES (from v3)
+   ------------------------------------------------------------
+   • No OAuth scope changes — sleep scope from v2 covers HRV
+     queries on the v2/sleep get endpoint. No re-authorization.
+
+   • Requires firmware 7.6+ on the Sleep Analyzer (released late
+     2025). To verify, open Withings app → tap a sleep entry →
+     scroll past the score; an "HRV" graph should appear.
+
+   • New field per night (when present):
+        hrv         (ms — average RMSSD across the night)
+        hrvSource   ("withings_mat" — flag for downstream code)
+
+   • Existing v3 fields still present:
+        sleepScore, sleepHours, deepMin, remMin, lightMin,
+        wakeups, sleepEff, sleepLatency, timeInBed,
+        sleepHrAvg, sleepHrMin, sleepHrMax, breathRate,
+        outOfBed, breathDist, snoring
+
+   • Caveat for downstream interpretation: Withings mat HRV is
+     measured via ballistocardiography. Numerical values are
+     NOT directly comparable to Oura's PPG-based HRV. Use for
+     trends, not absolute comparison.
+
+   ============================================================
+   ONE-TIME SETUP (unchanged from v1, included for reference)
+   ------------------------------------------------------------
+   1. Register an app at https://developer.withings.com  (Account →
+      "Partner / Developer dashboard" → create an application,
+      type: "Public API / Development").
+        - Note the Client ID and Client Secret.
+        - Set the Callback URL EXACTLY to:
+             https://withings-sync.lesteps24.workers.dev/oauth/callback
+          (match your real Worker name/subdomain).
+
+   2. Create this Worker (name it "withings-sync"), paste this file.
+
+   3. Create a KV namespace and bind it to this Worker as  WITHINGS_KV
+        - Dashboard: Worker → Settings → Bindings → Add → KV namespace
+          → Variable name: WITHINGS_KV  → (create/select a namespace)
+
+   4. Add two secrets (Worker → Settings → Variables and Secrets → Add → Secret):
+        - WITHINGS_CLIENT_ID
+        - WITHINGS_CLIENT_SECRET
+
+   5. Deploy. Then in a browser open:
+        https://withings-sync.lesteps24.workers.dev/oauth/start
+      Sign in to Withings, approve THE NEW SLEEP SCOPE TOO.
+      You'll be redirected back to a "Connected ✓" page.
+
+   6. Paste  https://withings-sync.lesteps24.workers.dev  into
+      Le Cadence → Health → Withings tab, and tap Sync.
+
+   Call:  GET <worker-url>/?days=30   ->   { "days": [ {day, weightKg,
+          weightLb, fatPct, leanKg, muscleKg, boneKg, systolic,
+          diastolic, hr, sleepScore, sleepHours, deepMin, remMin,
+          lightMin, wakeups, sleepEff}, ... ] }  (newest first)
+   ============================================================ */
+
+const AUTH_URL = "https://account.withings.com/oauth2_user/authorize2";
+const TOKEN_URL = "https://wbsapi.withings.net/v2/oauth2";
+const MEASURE_URL = "https://wbsapi.withings.net/measure";
+const ACTIVITY_URL = "https://wbsapi.withings.net/v2/measure";
+const SLEEP_URL = "https://wbsapi.withings.net/v2/sleep";
+// Sleep scope is required for the v2/sleep endpoints
+const SCOPE = "user.metrics,user.activity,user.sleepevents";
+// Withings measure type codes -> our field names
+const TYPE = { 1: "weightKg", 6: "fatPct", 5: "leanKg", 76: "muscleKg", 88: "boneKg", 9: "diastolic", 10: "systolic", 11: "hr" };
+const MEASTYPES = Object.keys(TYPE).join(",");
+
+export default {
+  async fetch(request, env) {
+    const cors = {
+      "Access-Control-Allow-Origin": "*",
+      "Access-Control-Allow-Methods": "GET, OPTIONS",
+      "Access-Control-Allow-Headers": "Content-Type",
+    };
+    if (request.method === "OPTIONS") return new Response(null, { headers: cors });
+
+    const json = (obj, status = 200) =>
+      new Response(JSON.stringify(obj), { status, headers: { ...cors, "Content-Type": "application/json" } });
+    const html = (body, status = 200) =>
+      new Response("<!doctype html><meta charset='utf-8'><body style='font-family:system-ui;max-width:34rem;margin:3rem auto;padding:0 1rem;color:#211D17;background:#EFE7D6'>" + body + "</body>", { status, headers: { ...cors, "Content-Type": "text/html" } });
+
+    const url = new URL(request.url);
+    const self = url.origin;
+    const cid = env.WITHINGS_CLIENT_ID;
+    const csecret = env.WITHINGS_CLIENT_SECRET;
+    const kv = env.WITHINGS_KV;
+
+    if (!cid || !csecret) return json({ error: "WITHINGS_CLIENT_ID / WITHINGS_CLIENT_SECRET secrets are not set." }, 500);
+    if (!kv) return json({ error: "WITHINGS_KV namespace binding is not set on this Worker." }, 500);
+
+    // token POST helper (form-urlencoded; Withings wraps payload in {status, body})
+    const requestToken = async (extra) => {
+      const form = new URLSearchParams({ action: "requesttoken", client_id: cid, client_secret: csecret, ...extra });
+      const r = await fetch(TOKEN_URL, { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: form });
+      return await r.json();
+    };
+
+    // ---- OAuth start: send user to Withings to approve ----
+    if (url.pathname === "/oauth/start") {
+      const redirect = self + "/oauth/callback";
+      const auth = `${AUTH_URL}?response_type=code&client_id=${encodeURIComponent(cid)}&scope=${encodeURIComponent(SCOPE)}&redirect_uri=${encodeURIComponent(redirect)}&state=lecadence`;
+      return Response.redirect(auth, 302);
+    }
+
+    // ---- OAuth callback: exchange code -> tokens, store refresh in KV ----
+    if (url.pathname === "/oauth/callback") {
+      const code = url.searchParams.get("code");
+      if (!code) return html("<h2>Missing authorization code.</h2><p>Start again at <code>/oauth/start</code>.</p>", 400);
+      const redirect = self + "/oauth/callback";
+      const data = await requestToken({ grant_type: "authorization_code", code, redirect_uri: redirect });
+      if (data.status !== 0 || !data.body || !data.body.refresh_token) {
+        return html("<h2>Withings authorization failed.</h2><pre>" + JSON.stringify(data, null, 2) + "</pre>");
+      }
+      await kv.put("refresh", data.body.refresh_token);
+      return html("<h2>Connected \u2713</h2><p>Withings is linked (with sleep scope). You can close this tab and tap <b>Sync</b> in Le Cadence → Health → Withings.</p>");
+    }
+
+    // ---- Data route: refresh token (rotates!), then getmeas + sleep ----
+    const refresh = await kv.get("refresh");
+    if (!refresh) return json({ error: "Not connected yet. Open /oauth/start in a browser to authorize Withings." }, 400);
+
+    const debug = url.searchParams.get("debug");
+    const days = Math.min(365, Math.max(1, parseInt(url.searchParams.get("days") || "30")));
+
+    const tok = await requestToken({ grant_type: "refresh_token", refresh_token: refresh });
+    if (tok.status !== 0 || !tok.body || !tok.body.access_token) {
+      return json({ error: "Token refresh failed — you may need to re-authorize at /oauth/start.", detail: tok }, 401);
+    }
+    // Withings rotates the refresh token: persist the new one immediately.
+    if (tok.body.refresh_token) await kv.put("refresh", tok.body.refresh_token);
+    const access = tok.body.access_token;
+
+    const end = Math.floor(Date.now() / 1000);
+    const startD = end - days * 86400;
+    const mform = new URLSearchParams({ action: "getmeas", meastypes: MEASTYPES, category: "1", startdate: String(startD), enddate: String(end) });
+    const mr = await fetch(MEASURE_URL, { method: "POST", headers: { Authorization: `Bearer ${access}`, "Content-Type": "application/x-www-form-urlencoded" }, body: mform });
+    const md = await mr.json();
+    if (md.status !== 0 || !md.body) return json({ error: "getmeas failed.", detail: md }, 502);
+
+    const byDay = {};
+    (md.body.measuregrps || []).forEach((g) => {
+      const day = new Date(g.date * 1000).toISOString().slice(0, 10);
+      const d = (byDay[day] = byDay[day] || { day });
+      (g.measures || []).forEach((m) => {
+        const field = TYPE[m.type];
+        if (!field) return;
+        const val = m.value * Math.pow(10, m.unit);
+        // keep the last reading of the day for each field
+        d[field] = field === "weightKg" || field === "leanKg" || field === "muscleKg" || field === "boneKg"
+          ? Math.round(val * 100) / 100
+          : Math.round(val * 10) / 10;
+      });
+    });
+
+    // ---- steps (getactivity) — optional; never fail the whole sync on it ----
+    try {
+      const ymd = (sec) => new Date(sec * 1000).toISOString().slice(0, 10);
+      let offset = 0, guard = 0;
+      do {
+        const aform = new URLSearchParams({ action: "getactivity", startdateymd: ymd(startD), enddateymd: ymd(end), data_fields: "steps,distance,calories", offset: String(offset) });
+        const ar = await fetch(ACTIVITY_URL, { method: "POST", headers: { Authorization: `Bearer ${access}`, "Content-Type": "application/x-www-form-urlencoded" }, body: aform });
+        const ad = await ar.json();
+        if (ad.status !== 0 || !ad.body) break;
+        (ad.body.activities || []).forEach((a) => {
+          const dd = (byDay[a.date] = byDay[a.date] || { day: a.date });
+          if (a.steps != null) dd.steps = a.steps;
+          if (a.distance != null) dd.distanceM = Math.round(a.distance);
+          if (a.calories != null) dd.activeCal = Math.round(a.calories);
+        });
+        offset = ad.body.more ? ad.body.offset : 0;
+        guard++;
+      } while (offset && guard < 12);
+    } catch (e) { /* steps are a bonus; ignore errors */ }
+
+    // ---- sleep (v2/sleep getsummary) — optional; never fail the whole sync on it ----
+    // Sleep Analyzer mat data: score, hours, stages, wakeups, efficiency,
+    // heart rate (avg/min/max), respiratory rate, sleep latency,
+    // out-of-bed count, breathing disturbances, snoring.
+    // Attributed to the WAKE-UP date (matches Oura convention).
+    try {
+      const ymd = (sec) => new Date(sec * 1000).toISOString().slice(0, 10);
+      let sOffset = 0, sGuard = 0;
+      do {
+        const sform = new URLSearchParams({
+          action: "getsummary",
+          startdateymd: ymd(startD),
+          enddateymd: ymd(end),
+          data_fields: [
+            "sleep_score", "total_sleep_time", "total_timeinbed",
+            "deepsleepduration", "remsleepduration", "lightsleepduration",
+            "wakeupcount", "sleep_efficiency", "wakeupduration",
+            "durationtosleep", "hr_average", "hr_min", "hr_max",
+            "rr_average", "out_of_bed_count",
+            "breathing_disturbances_intensity", "snoring",
+          ].join(","),
+          offset: String(sOffset),
+        });
+        const sr = await fetch(SLEEP_URL, { method: "POST", headers: { Authorization: `Bearer ${access}`, "Content-Type": "application/x-www-form-urlencoded" }, body: sform });
+        const sd = await sr.json();
+        if (sd.status !== 0 || !sd.body) break;
+        (sd.body.series || []).forEach((entry) => {
+          const data = entry.data || {};
+          const wakeDate = new Date(entry.enddate * 1000);
+          const dayKey = `${wakeDate.getFullYear()}-${String(wakeDate.getMonth() + 1).padStart(2, "0")}-${String(wakeDate.getDate()).padStart(2, "0")}`;
+          const dd = (byDay[dayKey] = byDay[dayKey] || { day: dayKey });
+          // Sleep score: 0-100
+          if (data.sleep_score != null) dd.sleepScore = data.sleep_score;
+          // Durations from Withings are in SECONDS; convert to hours (total) or minutes (stages, latency)
+          if (data.total_sleep_time != null) dd.sleepHours = Math.round((data.total_sleep_time / 3600) * 100) / 100;
+          if (data.total_timeinbed != null) dd.timeInBed = Math.round((data.total_timeinbed / 3600) * 100) / 100;
+          if (data.deepsleepduration != null) dd.deepMin = Math.round(data.deepsleepduration / 60);
+          if (data.remsleepduration != null) dd.remMin = Math.round(data.remsleepduration / 60);
+          if (data.lightsleepduration != null) dd.lightMin = Math.round(data.lightsleepduration / 60);
+          if (data.wakeupcount != null) dd.wakeups = data.wakeupcount;
+          if (data.sleep_efficiency != null) dd.sleepEff = Math.round(data.sleep_efficiency * 10) / 10;
+          if (data.durationtosleep != null) dd.sleepLatency = Math.round(data.durationtosleep / 60);
+          // Heart rate during sleep (bpm)
+          if (data.hr_average != null) dd.sleepHrAvg = Math.round(data.hr_average);
+          if (data.hr_min != null) dd.sleepHrMin = Math.round(data.hr_min);
+          if (data.hr_max != null) dd.sleepHrMax = Math.round(data.hr_max);
+          // Respiratory rate (breaths/minute)
+          if (data.rr_average != null) dd.breathRate = Math.round(data.rr_average * 10) / 10;
+          // Restlessness signals
+          if (data.out_of_bed_count != null) dd.outOfBed = data.out_of_bed_count;
+          if (data.breathing_disturbances_intensity != null) dd.breathDist = Math.round(data.breathing_disturbances_intensity * 10) / 10;
+          // Snoring is reported in seconds; convert to minutes
+          if (data.snoring != null) dd.snoring = Math.round(data.snoring / 60);
+        });
+        sOffset = sd.body.more ? sd.body.offset : 0;
+        sGuard++;
+      } while (sOffset && sGuard < 12);
+    } catch (e) { /* sleep is a bonus; ignore errors so the rest of the sync still works */ }
+
+    // ---- HRV (v2/sleep get) — nightly RMSSD from Sleep Analyzer mat ----
+    // The getsummary endpoint doesn't include HRV; we have to call the `get` action
+    // which returns minute-level timeseries data, then average RMSSD per night.
+    // Requires firmware 7.6+ on the Sleep Analyzer.
+    try {
+      const hrvForm = new URLSearchParams({
+        action: "get",
+        startdate: String(startD),
+        enddate: String(end),
+        data_fields: "rmssd,sdnn_1",
+      });
+      const hrvRes = await fetch(SLEEP_URL, { method: "POST", headers: { Authorization: `Bearer ${access}`, "Content-Type": "application/x-www-form-urlencoded" }, body: hrvForm });
+      const hrvData = await hrvRes.json();
+      if (hrvData.status === 0 && hrvData.body && Array.isArray(hrvData.body.series)) {
+        // Group RMSSD values by wake-up date.
+        // Each series item is a state period within a sleep session.
+        // The rmssd field is a dict keyed by Unix timestamp.
+        const rmssdByDay = {};
+        for (const period of hrvData.body.series) {
+          // Attribute to the wake-up day (enddate of the period's containing sleep session)
+          const wakeDate = new Date((period.enddate || period.startdate) * 1000);
+          const dayKey = `${wakeDate.getFullYear()}-${String(wakeDate.getMonth() + 1).padStart(2, "0")}-${String(wakeDate.getDate()).padStart(2, "0")}`;
+          if (period.rmssd && typeof period.rmssd === "object") {
+            const vals = Object.values(period.rmssd).filter((v) => typeof v === "number" && v > 0);
+            if (vals.length) {
+              if (!rmssdByDay[dayKey]) rmssdByDay[dayKey] = [];
+              rmssdByDay[dayKey].push(...vals);
+            }
+          }
+        }
+        // Compute average per day; attach to byDay
+        for (const [day, values] of Object.entries(rmssdByDay)) {
+          if (values.length >= 3) {
+            // Require at least 3 readings for a meaningful average
+            const avg = values.reduce((a, b) => a + b, 0) / values.length;
+            const dd = (byDay[day] = byDay[day] || { day });
+            dd.hrv = Math.round(avg);
+            dd.hrvSource = "withings_mat";
+          }
+        }
+      }
+    } catch (e) { /* hrv is a bonus; ignore so the rest of the sync still works */ }
+
+    const out = Object.values(byDay).sort((a, b) => (a.day < b.day ? 1 : -1));
+    out.forEach((d) => { if (d.weightKg != null) d.weightLb = Math.round(d.weightKg * 2.2046226 * 10) / 10; });
+
+    if (debug) {
+      const sleepCount = out.filter((d) => d.sleepScore != null).length;
+      return json({
+        range: { startdate: startD, enddate: end, days },
+        groups: (md.body.measuregrps || []).length,
+        daysReturned: out.length,
+        sleepNightsReturned: sleepCount,
+        sample: out[0] || null,
+        days: out,
+      });
+    }
+    return json({ days: out });
+  },
+};

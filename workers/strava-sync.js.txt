@@ -1,0 +1,86 @@
+/**
+ * Le Cadence · Strava sync Worker
+ * GET https://<worker>/?days=30
+ *   → { workouts: [{ id, day, type, name, minutes, elapsed, start, source }], warnings: [] }
+ * Secrets: STRAVA_CLIENT_ID, STRAVA_CLIENT_SECRET, STRAVA_REFRESH_TOKEN
+ * Optional: STRAVA_KV (KV binding, stores a rotated refresh token), ALLOWED_ORIGIN (default "*")
+ */
+
+const TOKEN_URL = "https://www.strava.com/oauth/token";
+const ACTS_URL  = "https://www.strava.com/api/v3/athlete/activities";
+const KV_KEY    = "strava_refresh_token";
+
+export default {
+  async fetch(request, env) {
+    const cors = {
+      "Access-Control-Allow-Origin": env.ALLOWED_ORIGIN || "*",
+      "Access-Control-Allow-Methods": "GET, OPTIONS",
+      "Access-Control-Allow-Headers": "Content-Type",
+      "Cache-Control": "no-store",
+    };
+    if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: cors });
+    if (request.method !== "GET") return json({ error: "GET only" }, 405, cors);
+
+    const url = new URL(request.url);
+    const days = clamp(parseInt(url.searchParams.get("days") || "30", 10) || 30, 1, 400);
+    const warnings = [];
+
+    try {
+      if (!env.STRAVA_CLIENT_ID || !env.STRAVA_CLIENT_SECRET || !env.STRAVA_REFRESH_TOKEN) {
+        return json({ error: "Worker is missing STRAVA_CLIENT_ID / STRAVA_CLIENT_SECRET / STRAVA_REFRESH_TOKEN secrets" }, 500, cors);
+      }
+
+      // 1. refresh the access token
+      let refreshToken = env.STRAVA_REFRESH_TOKEN;
+      if (env.STRAVA_KV) { try { const k = await env.STRAVA_KV.get(KV_KEY); if (k) refreshToken = k; } catch (e) { warnings.push("KV read failed; used secret"); } }
+
+      const tr = await fetch(TOKEN_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ client_id: env.STRAVA_CLIENT_ID, client_secret: env.STRAVA_CLIENT_SECRET, grant_type: "refresh_token", refresh_token: refreshToken }),
+      });
+      if (!tr.ok) return json({ error: `Strava token refresh failed (${tr.status}) — re-run the authorize step and update STRAVA_REFRESH_TOKEN` }, 502, cors);
+      const tok = await tr.json();
+      const access = tok.access_token;
+      if (!access) return json({ error: "Strava returned no access token" }, 502, cors);
+      if (env.STRAVA_KV && tok.refresh_token && tok.refresh_token !== refreshToken) {
+        try { await env.STRAVA_KV.put(KV_KEY, tok.refresh_token); } catch (e) { warnings.push("KV write failed (token rotated)"); }
+      }
+
+      // 2. pull activities since <days> ago (paginated)
+      const after = Math.floor((Date.now() - days * 86400000) / 1000);
+      const workouts = [];
+      for (let page = 1; page <= 4; page++) {
+        const ar = await fetch(`${ACTS_URL}?after=${after}&per_page=100&page=${page}`, { headers: { Authorization: `Bearer ${access}` } });
+        if (ar.status === 429) { warnings.push("Strava rate limit hit; partial results"); break; }
+        if (!ar.ok) return json({ error: `Strava activities failed (${ar.status})` }, 502, cors);
+        const list = await ar.json();
+        if (!Array.isArray(list) || !list.length) break;
+        list.forEach((a) => workouts.push(normalize(a)));
+        if (list.length < 100) break;
+      }
+
+      workouts.sort((x, y) => (x.start < y.start ? 1 : -1));
+      return json({ workouts, days, warnings }, 200, cors);
+    } catch (e) {
+      return json({ error: "Worker error: " + (e && e.message ? e.message : String(e)) }, 500, cors);
+    }
+  },
+};
+
+function normalize(a) {
+  const startLocal = String(a.start_date_local || a.start_date || "");
+  return {
+    id: a.id,
+    day: startLocal.slice(0, 10),
+    type: a.sport_type || a.type || "Workout",
+    name: a.name || "",
+    minutes: Math.round((a.moving_time || a.elapsed_time || 0) / 60),
+    elapsed: Math.round((a.elapsed_time || a.moving_time || 0) / 60),
+    start: startLocal,
+    source: (a.external_id || a.device_name || "").toLowerCase().includes("peloton") ? "peloton" : (a.device_name || "strava"),
+  };
+}
+
+const clamp = (n, lo, hi) => Math.min(hi, Math.max(lo, n));
+const json = (obj, status, headers) => new Response(JSON.stringify(obj), { status, headers: { ...headers, "Content-Type": "application/json" } });

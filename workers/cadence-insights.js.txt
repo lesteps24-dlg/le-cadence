@@ -1,0 +1,108 @@
+// cadence-insights — Cloudflare Worker
+// Cross-database "where can I improve" analyzer for Le Cadence.
+// Mirrors your existing *-analyze Workers: takes a POST, calls Claude, returns { analysis }.
+//
+// ── Deploy (Cloudflare dashboard) ───────────────────────────────────────────
+// 1. Workers & Pages → Create → Worker → name it "cadence-insights" → paste this file.
+// 2. Settings → Variables and Secrets → add a SECRET named ANTHROPIC_API_KEY (your key).
+// 3. Deploy. Copy the URL (e.g. https://cadence-insights.<you>.workers.dev/).
+// 4. In index.html, set INSIGHTS_URL (top of the Consistency app) to that URL. Redeploy the page.
+//
+// ── Deploy (wrangler CLI) ───────────────────────────────────────────────────
+//   wrangler deploy cadence-insights-worker.js --name cadence-insights
+//   wrangler secret put ANTHROPIC_API_KEY
+// ────────────────────────────────────────────────────────────────────────────
+
+const MODEL = "claude-sonnet-4-6";   // swap if you prefer a different model
+const ALLOW_ORIGIN = "*";            // tighten to your Pages domain if you like
+
+const CORS = {
+  "Access-Control-Allow-Origin": ALLOW_ORIGIN,
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+  "Access-Control-Allow-Headers": "content-type",
+};
+
+function json(body, status) {
+  return new Response(JSON.stringify(body), {
+    status: status || 200,
+    headers: { "content-type": "application/json", ...CORS },
+  });
+}
+
+const SYSTEM = `You are Linda's personal performance reviewer inside her "Le Cadence" app suite.
+
+You receive PRE-COMPUTED metrics (already summarized over the last ~30 days), not raw logs. The payload has:
+- consistency: her six daily anchors (Move; Eating window; Sleep & recover; Study; Whole foods; Water 80-100 oz) with 30-day completion rate, current streak, perfect days, and weight progress toward a 15 lb goal.
+- health: water (avg oz/day vs goal, % days met), fasting (avg hours vs goal, % days met), wholeFoods (avg whole meals/day of 3), sleep (avg hours, % nights in 6-8h target, avg score), recovery (avg HRV/RHR), supplements, movementResets.
+- time: total and per-day tracked hours, hoursByGroup, commitment completion %, open/overdue todos.
+- muse: session counts, avg APF/Calm/Recharge, APF trend.
+- dataFound: how many days/sessions back each area. Treat low counts as low confidence.
+- notes (optional, may be null): recent free-text from the last ~14 days — Quick Log reflections, what she ate (breakfast/lunch/dinner), Muse flags, and her per-anchor Consistency notes. Use these to explain the numbers (the "why" behind a dip or a streak), but weight the metrics more heavily than any single note, and never quote a note back verbatim. When meals are present, kindly flag foods and patterns that may work against her blood-pressure or weight goals — high-sodium or heavily processed items, added sugar, fried/fast food, alcohol, low-protein or low-fiber/low-vegetable days — and offer a simple swap rather than scolding. Do not give calorie targets.
+
+Cross-check related signals: her Water anchor vs logged avg oz; her Eating-window anchor vs fasting hours; her Sleep anchor vs Oura hours; her Study anchor vs Time study hours. Call out mismatches (e.g. anchor ticked but the underlying number is below target) and cross-cutting patterns (e.g. short sleep nights alongside missed study).
+
+Your job: name the 2-4 highest-leverage places she can improve, each grounded in a specific number from the data. If dataFound shows an area is sparse or zero, say so plainly and don't infer from it. Prioritize what moves the 15 lb goal and her consistency.
+
+Voice: warm, grounded, a little literary, like a field journal. No corporate filler, no hype, no emoji, no markdown symbols. 150-220 words of plain prose. Lead each point with a short phrase and a period, then the detail.`;
+
+const SYSTEM_HORIZON = `You are projecting what Linda can realistically expect at 30, 60, 90, and 120 days IF she holds roughly her current adherence — based ENTIRELY on her own data in the payload: adherencePct, ratePerWeekLb (weight-loss pace; positive = losing), lbsLost so far toward ringGoalLb (15), studyDaysRate, perAnchor streaks and 30-day rates, and a pre-computed "projection" array (per horizon: projLost lb, studyHrsFloor, trophyTier reachable). Anchor to those numbers; never invent more optimistic ones.
+
+For each of the four horizons give 1-2 sentences covering (a) where her behavior likely is — habit automaticity takes a median of about 66 days, so simple anchors (water, eating window) automate sooner while effortful ones (study, strength) stay somewhat effortful longer — and (b) concrete milestones drawn from HER data: projected weight down, cumulative study hours (treat studyHrsFloor as a floor, since the anchor is one hour or more), the trophy tier reachable, and the strength, sleep, and energy changes that typically follow consistency.
+
+If ratePerWeekLb is null or 0 or negative, say the weight and ring timeline needs a downward trend first rather than projecting a number. Note that at a sustainable pace the 15 lb ring is likely month 5-6, so 120 days probably has her close, not certainly across — and that closing on a holdable pace beats hitting it and rebounding. Be conservative, encouraging, and honest. Do not give calorie targets.
+
+Voice: warm, grounded, a little literary, like a field journal. No hype, no emoji, no markdown symbols. Label each block plainly as Day 30, Day 60, Day 90, Day 120, each on its own short paragraph. About 180-240 words total.`;
+
+export default {
+  async fetch(request, env) {
+    if (request.method === "OPTIONS") return new Response(null, { headers: CORS });
+    if (request.method !== "POST") return json({ error: "POST only" }, 405);
+    if (!env.ANTHROPIC_API_KEY) return json({ error: "ANTHROPIC_API_KEY secret is not set on the Worker" }, 500);
+
+    let payload, task;
+    try {
+      const body = await request.json();
+      payload = body.payload != null ? body.payload : body;
+      task = body.task || (payload && payload.task) || "insights";
+    } catch (e) {
+      return json({ error: "invalid JSON body" }, 400);
+    }
+
+    const isHorizon = task === "horizon";
+    const sys = isHorizon ? SYSTEM_HORIZON : SYSTEM;
+    const userText = isHorizon
+      ? ("Here are my own trends and the data-grounded projections. Reassess what I can realistically expect at 30, 60, 90, and 120 days, grounded in these numbers.\n\n```json\n" + JSON.stringify(payload).slice(0, 60000) + "\n```")
+      : ("Here is the current data across the four areas. Review it and tell me where to improve.\n\n```json\n" + JSON.stringify(payload).slice(0, 60000) + "\n```");
+
+    try {
+      const r = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-api-key": env.ANTHROPIC_API_KEY,
+          "anthropic-version": "2023-06-01",
+        },
+        body: JSON.stringify({
+          model: MODEL,
+          max_tokens: 800,
+          system: sys,
+          messages: [{ role: "user", content: userText }],
+        }),
+      });
+
+      const data = await r.json();
+      if (!r.ok) return json({ error: "anthropic request failed", detail: JSON.stringify(data) }, 502);
+
+      const analysis = (data.content || [])
+        .filter((b) => b.type === "text")
+        .map((b) => b.text)
+        .join("\n")
+        .trim();
+
+      if (!analysis) return json({ error: "empty response from model" }, 502);
+      return json({ analysis });
+    } catch (e) {
+      return json({ error: "worker error", detail: String(e && e.message || e) }, 500);
+    }
+  },
+};

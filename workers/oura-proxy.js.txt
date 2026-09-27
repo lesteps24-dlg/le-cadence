@@ -1,0 +1,61 @@
+/**
+ * Family Greene Apps — Oura API Proxy Worker
+ * Worker name: oura-proxy
+ * Deployed at: https://oura-proxy.lesteps24.workers.dev
+ *
+ * Forwards all requests to api.ouraring.com, adding CORS headers.
+ */
+ 
+const OURA_BASE = 'https://api.ouraring.com';
+ 
+const CORS_HEADERS = {
+  'Access-Control-Allow-Origin':  '*',
+  'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+  'Access-Control-Allow-Headers': 'Authorization, Content-Type',
+  'Access-Control-Max-Age':       '86400',
+};
+ 
+export default {
+  async fetch(request) {
+ 
+    // ── Preflight ───────────────────────────────────────────────
+    if (request.method === 'OPTIONS') {
+      return new Response(null, { status: 204, headers: CORS_HEADERS });
+    }
+ 
+    // ── Build Oura URL ──────────────────────────────────────────
+    const url    = new URL(request.url);
+    const path   = url.pathname + url.search;   // e.g. /v2/usercollection/daily_sleep?...
+    const target = OURA_BASE + path;
+ 
+    // ── Forward headers ─────────────────────────────────────────
+    const headers = new Headers();
+    headers.set('Content-Type', 'application/json');
+    const auth = request.headers.get('Authorization');
+    if (auth) headers.set('Authorization', auth);
+ 
+    // ── Proxy the request ───────────────────────────────────────
+    let resp;
+    try {
+      resp = await fetch(target, {
+        method:  request.method,
+        headers: headers,
+      });
+    } catch (err) {
+      return new Response(
+        JSON.stringify({ error: 'Proxy fetch failed: ' + err.message }),
+        { status: 502, headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' } }
+      );
+    }
+ 
+    // ── Return with CORS headers ────────────────────────────────
+    const respBody    = await resp.text();
+    const respHeaders = new Headers(CORS_HEADERS);
+    respHeaders.set('Content-Type', resp.headers.get('Content-Type') || 'application/json');
+ 
+    return new Response(respBody, {
+      status:  resp.status,
+      headers: respHeaders,
+    });
+  },
+};

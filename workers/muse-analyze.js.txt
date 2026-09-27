@@ -1,0 +1,332 @@
+/**
+ * muse-analyze · Cloudflare Worker
+ *
+ * Proxies session and trend analysis requests to the Anthropic API.
+ *
+ * DEPLOYMENT:
+ *   1. Create new Worker at https://dash.cloudflare.com → Workers → Create
+ *      Name it: muse-analyze (subdomain becomes muse-analyze.lesteps24.workers.dev)
+ *   2. Settings → Variables and Secrets → Add Secret:
+ *      Name:  ANTHROPIC_API_KEY
+ *      Value: (your sk-ant-... key)
+ *   3. Paste this entire file into the Worker editor and deploy.
+ *
+ * EXPECTED REQUEST:
+ *   POST /
+ *   { mode: "session",  session: {...},  priorContext: [...] }
+ *   { mode: "trends",   sessions: [...] }
+ *
+ * RESPONSE:
+ *   { headline: "...", detail: "...", model: "claude-opus-4-7", ts: <unix ms> }
+ *   or { error: "...", detail: "..." }
+ */
+
+const MODEL = "claude-opus-4-7";
+const MAX_TOKENS = 900;
+
+const CORS = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type",
+};
+
+const json = (body, status = 200) => new Response(JSON.stringify(body), {
+  status,
+  headers: { "Content-Type": "application/json", ...CORS },
+});
+
+export default {
+  async fetch(request, env) {
+    if (request.method === "OPTIONS") return new Response(null, { headers: CORS });
+    if (request.method !== "POST")    return json({ error: "POST only" }, 405);
+    if (!env.ANTHROPIC_API_KEY)       return json({ error: "ANTHROPIC_API_KEY not configured on Worker" }, 500);
+
+    let body;
+    try { body = await request.json(); } catch (_) { return json({ error: "invalid JSON" }, 400); }
+
+    const { mode } = body;
+    let prompt;
+    if (mode === "session") {
+      if (!body.session) return json({ error: "session required for mode=session" }, 400);
+      prompt = buildSessionPrompt(body.session, body.priorContext || [], !!body.chartImage);
+    } else if (mode === "trends") {
+      if (!Array.isArray(body.sessions)) return json({ error: "sessions array required for mode=trends" }, 400);
+      prompt = buildTrendsPrompt(body.sessions);
+    } else if (mode === "sleep_trends") {
+      if (!Array.isArray(body.sleepDays)) return json({ error: "sleepDays array required for mode=sleep_trends" }, 400);
+      prompt = buildSleepTrendsPrompt(body.sleepDays, body.targetMin, body.targetMax, body.ouraAvailable);
+    } else {
+      return json({ error: "mode must be 'session', 'trends', or 'sleep_trends'" }, 400);
+    }
+
+    try {
+      // Build messages — when a chart image is attached (session mode only),
+      // use Claude's vision capability to interpret the Brainwave Powerbands and
+      // Brain Oxygenation charts alongside the session metrics.
+      let messages;
+      if (mode === "session" && body.chartImage) {
+        const mediaType = body.chartImageType || "image/png";
+        messages = [{
+          role: "user",
+          content: [
+            { type: "image", source: { type: "base64", media_type: mediaType, data: body.chartImage } },
+            { type: "text", text: prompt },
+          ],
+        }];
+      } else {
+        messages = [{ role: "user", content: prompt }];
+      }
+
+      const res = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": env.ANTHROPIC_API_KEY,
+          "anthropic-version": "2023-06-01",
+        },
+        body: JSON.stringify({
+          model: MODEL,
+          max_tokens: MAX_TOKENS,
+          messages,
+        }),
+      });
+
+      const raw = await res.text();
+      if (!res.ok) return json({ error: "claude api error", detail: raw }, 502);
+
+      let data;
+      try { data = JSON.parse(raw); }
+      catch (_) { return json({ error: "claude returned non-JSON", detail: raw.slice(0, 500) }, 502); }
+
+      const text = (data.content?.find(b => b.type === "text")?.text || "").trim();
+      let parsed;
+      try {
+        const clean = text.replace(/^```json\s*/i, "").replace(/```$/i, "").trim();
+        parsed = JSON.parse(clean);
+      } catch (_) {
+        // Last-resort: send the raw text as detail with a generic headline
+        parsed = { headline: "Interpretation generated", detail: text };
+      }
+
+      if (!parsed.headline || !parsed.detail) {
+        return json({ error: "claude response missing headline or detail", detail: text.slice(0, 500) }, 502);
+      }
+
+      return json({
+        headline: parsed.headline,
+        detail:   parsed.detail,
+        model:    MODEL,
+        ts:       Date.now(),
+      });
+    } catch (e) {
+      return json({ error: e.message || String(e) }, 500);
+    }
+  }
+};
+
+/* ============================================================
+   PROMPTS
+   ============================================================ */
+
+const SYSTEM_VOICE = `
+You are interpreting Muse EEG meditation session data for Linda, a Treasury Director who uses
+Muse for focus/recovery training alongside Oura Ring and Withings Sleep Analyzer tracking.
+She values direct, plain language and dislikes business jargon (no "leverage," "synergies," "bps").
+Use a calm, evidence-forward voice. Cite specific numbers from her data.
+
+Key Muse metrics:
+- APF (Alpha Peak Frequency, Hz) — cognitive capacity / processing speed. Slow-moving. 8-12 Hz range,
+  most adults 9.5-11, peak performers 11+. Linda is currently around 8.6 (the "Good" band).
+- Brain Recharge (dBx) — recovery depth via alpha power. 50-70 typical for engaged meditators;
+  70+ is "exceptional" per Muse.
+- Calm % — share of session in calm state. State quality, not capacity.
+- Birds (count) — number of calm-state catches during Mind/Focus sessions. Each bird = one moment
+  the brain entered an alpha-dominant state and the soundscape rewarded it. More granular than Calm %
+  because it tells you the NUMBER of times you settled, not just total time. Available in Focus/Mind sessions.
+- Body Stillness % — high (90+) means posture held; low signals dropout.
+- Recoveries — count of mind-wandering catches. U-shaped: more = more reps in building phase;
+  fewer = settled mind in advanced phase. NOT linearly "more is better" or "less is better."
+
+Note on respiratory rate: Linda's Withings Sleep Analyzer captures sleep-time breath rate
+(in recoveryContext.withings.breathRate). This is SLEEP breath rate, not session breath rate.
+Reference it as "your sleep breath rate was X" — never claim it as a session-level metric.
+
+Brain Powerbands (per-session % of total power in each EEG frequency band):
+- Delta δ (0.5-4 Hz) — high % = drowsy or near-sleep. Above ~25% means session drifted toward sleep.
+- Theta θ (4-8 Hz) — meditative depth. 20-35% is deep practice; >45% often tips into drowsiness.
+- Alpha α (8-13 Hz) — calm wakefulness. THIS IS THE BAND THAT DRIVES APF AND RECHARGE. 25-40% is strong.
+- Beta β (13-30 Hz) — active thinking. 15-25% is normal engagement; >30% suggests anxiety or analytical mode.
+- Gamma γ (30+ Hz) — high-level integration. Usually <5%; spikes can indicate distraction or external noise.
+- IMPORTANT: when powerbands are present in session data, cite Alpha % specifically as it's the upstream
+  lever for both APF and Recharge measurements. Compare bands to explain why Recharge landed where it did.
+
+Primary recovery scores (all 0-100, higher = better):
+- ouraReadiness — Oura's holistic readiness: sleep + HRV trend + body temp + activity recovery.
+- ouraSleep — Oura's sleep quality score (last night). Quality, duration, latency, restoration.
+- withingsSleep — Withings Sleep Analyzer score (last night). Independent mat-based measurement.
+- hrv (ms) — Heart Rate Variability (RMSSD). Higher = better-recovered. The session record's
+  hrvSource field tells you the origin: "oura" (PPG, finger-based, the reference) or "withings_mat"
+  (ballistocardiography). IMPORTANT: Oura and Withings HRV values are NOT directly comparable —
+  same person can read 50ms on Oura and 35ms on Withings the same night, because the sensors and
+  algorithms differ. Always use HRV for TREND interpretation (rising/falling within source), never
+  compare across sources. When hrvSource is "withings_mat", note this caveat in interpretations.
+- sleepBreathRate (bpm) — average respiratory rate during the previous night's sleep, from the
+  Withings Sleep Analyzer mat. Normal range 12-16 bpm. Trending up week-over-week can signal
+  illness onset, stress, or poor sleep depth — flag if notably elevated.
+
+Rich recovery context (under session.recoveryContext.oura and session.recoveryContext.withings):
+ORURA: sleepHours (decimal), hrv (ms), rhr (bpm), available (true/false)
+WITHINGS: sleepHours, timeInBed, deepMin, remMin, lightMin, wakeups, sleepEff (%),
+  sleepLatency (min), sleepHrAvg, sleepHrMin (best HRV proxy when Oura unavailable),
+  sleepHrMax, breathRate (resp/min), outOfBed, breathDist (0-100), snoring (min), available
+
+IMPORTANT — handling missing Oura data:
+Linda's Oura Ring may be temporarily offline (device being replaced). When recoveryContext.oura.available
+is false, do NOT mention Oura, HRV, or readiness in the interpretation. Instead lean on Withings:
+- Use sleepHrMin as the primary recovery signal (it's the best HRV proxy from sleep mat alone).
+  Linda's normal sleeping HR min is roughly 55-65 bpm depending on conditioning.
+  Sleep HR min trending up week-over-week signals reduced recovery (stress, illness, training load).
+- Use deepMin as the primary cognitive recovery driver (deep sleep clears metabolic waste and is the
+  upstream lever for Brain Recharge). Healthy adults: 60-110 min/night.
+- Use sleepEff to catch fragmentation hidden by total hours.
+- Use sleepLatency >20 min as a stress signal.
+- breathDist trending up = possible apnea/disordered breathing — worth flagging if persistent.
+
+Important nuances when BOTH Oura and Withings are available:
+- When Oura Sleep and Withings Sleep agree, the sleep read is high-confidence.
+- When they diverge meaningfully (>10 points), that's worth flagging — devices measure slightly different
+  things; the divergence often indicates restless sleep that one device caught but not the other.
+- When ouraReadiness is notably lower than either sleep score, that signals something *other than sleep*
+  is dragging recovery (stress load, illness coming, HRV depression, training fatigue).
+- When ouraReadiness is higher than sleep scores, prior days of good recovery are still buffering.
+
+Output rules:
+- Respond ONLY with valid JSON: { "headline": "...", "detail": "..." }
+- headline: ONE sentence. Direct, plain, no jargon. Names the story of the session.
+- detail: 2-4 short paragraphs in markdown (use **bold** for key numbers and findings).
+  Be specific. Cite the user's actual numbers including from recoveryContext when relevant.
+  End with one concrete actionable suggestion.
+- Never lecture. Never use generic wellness platitudes.
+- If data is sparse or only one session is available, say so honestly.
+- Do not wrap the JSON in code fences.
+`;
+
+function buildSessionPrompt(session, priorContext, hasChartImage) {
+  const priorBlock = priorContext.length
+    ? `\nPRIOR SESSIONS (most recent first, for comparison):\n${JSON.stringify(priorContext, null, 2)}`
+    : "\nNo prior sessions on record — this is the baseline read.";
+  const chartBlock = hasChartImage ? `
+
+CHART IMAGE ATTACHED:
+The user has attached a screenshot from the Muse Athena app's Brain Data view, which typically shows two charts:
+
+1. **Brainwave Powerbands** — line chart of EEG power (dB, usually -10 to 27 range) across the session for:
+   - Delta δ (slow waves, 0.5-4 Hz) — high = drowsy / deep states
+   - Theta θ (4-8 Hz) — meditative or drowsy
+   - Alpha α (8-13 Hz) — calm wakefulness; THIS IS THE BAND THAT DRIVES APF AND RECHARGE
+   - Beta β (13-30 Hz) — active thinking; high = analytical or anxious
+   - Gamma γ (30+ Hz) — high-level integration, usually near noise floor
+
+2. **Brain Oxygenation** — fNIRS sensor showing micromolar (μM) changes for:
+   - Left HbO / Right HbO — oxygenated hemoglobin (red/orange lines); rising = more blood flow / engagement
+   - Left HbR / Right HbR — deoxygenated hemoglobin (blue lines); typically inversely coupled to HbO
+   - Asymmetry between hemispheres can indicate lateralized cognitive activity
+   - Sudden large HbO drops can indicate breath holds, intense cognitive load, or sensor contact issues
+   - Dashed line segments indicate brief signal dropouts (sensor moved or lifted)
+
+INSTRUCTIONS WHEN CHART IS PRESENT:
+- READ the actual chart and cite specific observations with approximate timestamps when visible
+- Reference the band dominance pattern (which bands ran high, which were quiet)
+- Note any salient temporal events (synchronized spikes = external disturbance; HbO crashes = breath hold or effort)
+- Approximate ranges if precise numbers aren't readable
+- The Powerbands chart tells you about COGNITIVE STATE; the Oxygenation tells you about NEUROMETABOLIC EVENTS
+- Integrate chart observations naturally into the interpretation, don't list them separately
+` : "";
+  return `${SYSTEM_VOICE}
+
+TASK: Interpret this single Muse session.
+
+CURRENT SESSION:
+${JSON.stringify(session, null, 2)}
+${priorBlock}
+${chartBlock}
+
+Provide a session interpretation as JSON. Focus on:
+1. What's the story of THIS session (not generic advice)
+2. How does it compare to prior sessions (if any)
+3. What number stood out — and what was likely upstream of it${hasChartImage ? "\n4. Specific patterns visible in the attached chart (powerbands and/or oxygenation)" : ""}
+${hasChartImage ? "5. One concrete suggestion for next session" : "4. One concrete suggestion for next session"}
+
+Respond with ONLY the JSON object.`;
+}
+
+function buildTrendsPrompt(sessions) {
+  const n = sessions.length;
+  return `${SYSTEM_VOICE}
+
+TASK: Interpret patterns across Linda's Muse sessions.
+
+ALL SESSIONS (chronological):
+${JSON.stringify(sessions, null, 2)}
+
+There are ${n} session(s) on record. Provide a trend analysis as JSON. Focus on:
+1. The actual direction each metric is moving (or "no signal yet" if too few data points)
+2. Any visible correlations (sleep score vs. APF, duration vs. recharge, flags vs. scores)
+3. Be honest about statistical limits — if n < 7, say patterns are directional not confirmed
+4. One concrete next experiment or behavior change
+
+Important: if n is small (1-4 sessions), acknowledge this explicitly and recommend what data to gather next.
+For larger n, surface the strongest 1-2 patterns with specific numbers.
+
+Respond with ONLY the JSON object.`;
+}
+
+function buildSleepTrendsPrompt(sleepDays, targetMin, targetMax, ouraAvailable) {
+  const n = sleepDays.length;
+  const tMin = targetMin != null ? targetMin : 6;
+  const tMax = targetMax != null ? targetMax : 8.5;
+  return `You are interpreting Withings Sleep Analyzer and Oura Ring data for Linda, a Treasury Director
+who values direct, plain language. No business jargon, no wellness platitudes. Cite specific numbers.
+
+Linda's habit target band for total sleep: ${tMin}h to ${tMax}h.
+Oura currently available: ${ouraAvailable ? "yes" : "no — Oura Ring is offline, Withings is the primary source"}.
+
+Sleep data fields you may see per night:
+- sleepScore (0-100) — Withings overall sleep quality
+- ouraSleepScore (0-100) — Oura's sleep quality, when available
+- ouraReadiness (0-100) — Oura's recovery composite, when available
+- sleepHours, timeInBed (hours)
+- deepMin, remMin, lightMin (minutes per stage)
+- wakeups (count), sleepEff (%)
+- sleepLatency (minutes to fall asleep) — high = stress / racing mind
+- sleepHrMin, sleepHrAvg, sleepHrMax (bpm during sleep) — KEY when Oura unavailable; Linda's hr_min
+  trending UP week-over-week is the strongest recovery-decline signal we have
+- breathRate (resp/min during sleep) — trending up flags illness 1-2 days early
+- breathDist (0-100 disturbance intensity)
+- outOfBed, snoring (minutes)
+- hrv, rhr (Oura only, when available)
+
+TASK: Provide a sleep trend analysis as JSON with this exact shape:
+{ "headline": "...", "detail": "..." }
+
+- headline: ONE sentence, direct, no jargon. Names the strongest pattern.
+- detail: 2-4 short paragraphs in markdown. Use **bold** for key numbers. Cite specific stats.
+  Identify the strongest pattern (best/worst nights, correlations, trend direction).
+  End with ONE concrete actionable suggestion.
+
+What to surface (rank by signal strength):
+1. Habit met percentage and trend (% nights between ${tMin}h and ${tMax}h)
+2. Sleep HR min trajectory — best recovery signal; if rising trend, flag it
+3. Deep sleep adequacy — anything under 60 min/night avg deserves mention
+4. Sleep latency patterns — chronic >20 min suggests stress
+5. Score divergence between Withings and Oura when both present
+6. Identify best and worst nights with their distinguishing characteristics
+
+Be honest about statistical limits. If n < 5, patterns are directional not confirmed.
+Do not wrap the JSON in code fences.
+
+LAST ${n} NIGHTS (chronological):
+${JSON.stringify(sleepDays, null, 2)}
+
+Respond with ONLY the JSON object.`;
+}
