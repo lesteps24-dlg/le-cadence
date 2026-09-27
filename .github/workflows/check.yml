@@ -1,0 +1,22 @@
+name: Check before deploy
+
+# Runs on every push and every pull request. Cloudflare only publishes `main`,
+# so a red check on a PR is your review gate: fix it before you merge.
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install the parser
+        run: npm install --no-save --no-audit --no-fund esbuild@0.25.0
+      - name: Check index.html
+        run: node scripts/check-html.mjs

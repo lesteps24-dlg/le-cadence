@@ -85,7 +85,7 @@ const { useState, useEffect, useRef } = React;
     const SUPABASE_ANON  = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNsd2xuYnp4cmFpYXZwY2pidml5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQyMzg5NjksImV4cCI6MjA4OTgxNDk2OX0.-r80YRrZG2us0kQwFpo0IKbmYX45VsF8TFFnYPT3qsM";
     const TABLE         = "quick_log";
     const USER_KEY      = "linda";
-    const APP_VERSION   = "v7.51 · 2026-09-19";
+    const APP_VERSION   = "v7.52 · 2026-09-27";
     const TIME_ANALYZE_URL = "https://le-cadence-analyze.lesteps24.workers.dev/";
     const IDLE_GOAL_HRS = 1;   // target: no more than 1 hour of idle / TV per day
     const SESSION_TYPES = ["Study", "Class", "Quiz/Test", "Project", "Other"];
@@ -334,6 +334,30 @@ const { useState, useEffect, useRef } = React;
       { w: "Wk9",  s: "2026-12-14", e: "2026-12-20", m: "M9 — Pressure-test · Capstone SIP · final assessment → certificate", t: 3, mode: "surge" },
     ];
 
+    /* Full Stack Modeller — Excel Functions Challenge Series. Six workbooks, eight ramping levels each.
+       ASSUMPTION (Linda to confirm): the weekly hour targets below are a light placeholder so this does
+       not compete with PMP. Edit the t: values, or the PAUSE window, to change the plan. */
+    const FSM_WEEKS = [
+      { w: "Wk1",   s: "2026-09-28", e: "2026-10-04", m: "XLOOKUP levels 1–4", t: 1, mode: "light" },
+      { w: "Wk2",   s: "2026-10-05", e: "2026-10-11", m: "XLOOKUP levels 5–8", t: 1, mode: "light" },
+      { w: "Wk3",   s: "2026-10-12", e: "2026-10-18", m: "XMATCH — all eight levels", t: 1, mode: "light" },
+      { w: "Wk4",   s: "2026-10-19", e: "2026-10-25", m: "SORT & SORTBY — all eight levels", t: 1, mode: "light" },
+      { w: "PAUSE", s: "2026-10-26", e: "2026-11-15", m: "PAUSED — PMP final push, bootcamp Nov 9–12, exam Nov 14. Levels still tick if you do them; no hours are expected.", t: 0, mode: "break" },
+      { w: "Wk5",   s: "2026-11-16", e: "2026-11-22", m: "FILTER — all eight levels", t: 2, mode: "moderate" },
+      { w: "Wk6",   s: "2026-11-23", e: "2026-11-29", m: "UNIQUE — all eight levels", t: 2, mode: "moderate" },
+      { w: "Wk7",   s: "2026-11-30", e: "2026-12-06", m: "INDEX — all eight levels", t: 2, mode: "moderate" },
+      { w: "Wk8",   s: "2026-12-07", e: "2026-12-13", m: "Re-run every level that needed two attempts", t: 2, mode: "moderate" },
+    ];
+    const FSM_FUNCS = [
+      { k: "XLOOKUP",       icon: "🔎", note: "Exact, approximate and reverse search · the if-not-found argument" },
+      { k: "XMATCH",        icon: "📍", note: "Position logic, search modes, and pairing back into INDEX" },
+      { k: "SORT & SORTBY", icon: "↕️", note: "Multi-key sorts · sorting by a column you never display" },
+      { k: "FILTER",        icon: "🧹", note: "Multi-condition boolean logic · handling the empty result" },
+      { k: "UNIQUE",        icon: "✳️", note: "Distinct lists, by-column mode, exactly-once mode" },
+      { k: "INDEX",         icon: "🎯", note: "Whole row and column returns — the spill-safe alternative" },
+    ];
+    const FSM_LEVELS = [1, 2, 3, 4, 5, 6, 7, 8];
+
     const MAX_SESSION_MS = 12 * 3600000;  // safety: auto-pause a forgotten RUNNING timer after 12h (manual/edited blocks are never capped)
 
     /* ---------- date helpers ---------- */
@@ -389,6 +413,7 @@ const { useState, useEffect, useRef } = React;
           { id: "su4", name: "PMP", emoji: "📋", goalHrs: 80, weeklyTarget: 8, cumGoal: 80, dueDate: "2026-11-13", weekdayTarget: 1, weekendTarget: 2 },
           { id: "su5", name: "AMP", emoji: "⚡", goalHrs: 59, weeklyTarget: 6, cumGoal: 59, dueDate: "2026-11-22", weekdayTarget: 1, weekendTarget: 1.5 },
           { id: "su6", name: "Strategic Comm", emoji: "🎯", goalHrs: 16, weeklyTarget: 2, cumGoal: 16, dueDate: "2026-12-31", weekdayTarget: 0.5, weekendTarget: 1 },
+          { id: "su7", name: "Excel Functions", emoji: "📐", goalHrs: 12, weeklyTarget: 1, cumGoal: 12, dueDate: "2026-12-13", weekdayTarget: 0.25, weekendTarget: 0.5 },
           { id: "su1", name: "MIT IDSS", emoji: "📊", goalHrs: 285, weeklyTarget: 13, cumGoal: 285, dueDate: "2026-07-11" },
           { id: "su2", name: "CPA FAR", emoji: "🧮", goalHrs: 120, weeklyTarget: 0, cumGoal: 300, dueDate: null },
           { id: "su3", name: "Spanish", emoji: "🗣️", goalHrs: 0, weeklyTarget: 2, cumGoal: null, dueDate: null },
@@ -550,11 +575,18 @@ const { useState, useEffect, useRef } = React;
       if (!Array.isArray(merged.study.scChecklist)) merged.study.scChecklist = SC_CHECKLIST.map((it, i) => ({ id: "sc" + i, label: it.label, note: it.note || "", status: it.status }));
       if (!Array.isArray(merged.study.ampChecklist)) merged.study.ampChecklist = AMP_CHECKLIST.map((it, i) => ({ id: "am" + i, label: it.label, note: it.note || "", status: it.status }));
       if (!Array.isArray(merged.study.pmpChecklist)) merged.study.pmpChecklist = PMP_APP_CHECKLIST.map((it, i) => ({ id: "ck" + i, label: it.label, note: it.note || "", status: it.status }));
+      // v7.52 — Excel Functions Challenge: seed the subject and the level map into state that already exists
+      if (Array.isArray(merged.study.subjects) && !merged.study.subjects.some((su) => su.id === "su7"))
+        merged.study.subjects = [...merged.study.subjects, { id: "su7", name: "Excel Functions", emoji: "📐", goalHrs: 12, weeklyTarget: 1, cumGoal: 12, dueDate: "2026-12-13", weekdayTarget: 0.25, weekendTarget: 0.5 }];
+      if (!merged.study.fsmDone || typeof merged.study.fsmDone !== "object") merged.study.fsmDone = {};
       if (!merged.study.links) merged.study.links = {
         pmp: "PMI Study Hall Plus | https://www.pmi.org/shop/us/p-/digital-product/project-management-professional-pmi-study-hall-plus/dp069\nPMTI Student Portal | https://www.onlinepmti.com\nPMTI | https://www.4pmti.com\nMyPMI — reschedule exam here | https://www.pmi.org\nPMP certification page | https://www.pmi.org/certifications/project-management-pmp\n2026 ECO (PMI, free PDF) | https://www.pmi.org/-/media/pmi/documents/public/pdf/certifications/new-pmp-examination-content-outline-2026.pdf\nPearson VUE — test center info only | https://www.pearsonvue.com\nPM Podcast (Fichtner) | https://www.pm-podcast.com\n5 Minutes (Vargas) | https://ricardo-vargas.com/podcasts/\nPMI Projectified | https://www.pmi.org/podcast\nDavid McLachlan (YouTube) | https://www.youtube.com/@davidmclachlanproject\n↳ PMP practice questions | https://www.youtube.com/playlist?list=PLEWFSKHjyrwywWx6mri0ooX5YVjDPrgX1",
         ampplan: "AMP portal | paste-your-link-here",
         scplan: "MasterClass — log in as lndae24 | https://www.masterclass.com/certificates/strategic-communication-build-trust-drive-decisions-lead-with-influence\nPractice Studio | #practice",
+        fnplan: "Functions Challenge Series | https://app.fullstackmodeller.com/spaces/23313217/page\nAll three challenge series | https://challenges.fullstackmodeller.com/",
       };
+      if (merged.study.links && !merged.study.links.fnplan)
+        merged.study.links.fnplan = "Functions Challenge Series | https://app.fullstackmodeller.com/spaces/23313217/page\nAll three challenge series | https://challenges.fullstackmodeller.com/";
       if (merged.study.links && typeof merged.study.links.scplan === "string")
         merged.study.links.scplan = merged.study.links.scplan.replace("MasterClass course |", "MasterClass — log in as lndae24 |");
       if (merged.study.links && typeof merged.study.links.pmp === "string") {
@@ -988,6 +1020,7 @@ const { useState, useEffect, useRef } = React;
       const [linksEdit, setLinksEdit] = useState(false);
       const setScheduleTemplate = (day, txt) => setState((s) => ({ ...s, study: { ...s.study, scheduleTemplate: { ...(s.study.scheduleTemplate || {}), [day]: txt } } }));
       const [gridSel, setGridSel] = useState(null);
+      const toggleFsm = (fn, lvl) => setState((s) => { const key = fn + ":" + lvl; const d = { ...(s.study.fsmDone || {}) }; if (d[key]) delete d[key]; else d[key] = true; return { ...s, study: { ...s.study, fsmDone: d } }; });
       const toggleScWeek = (label) => setState((s) => { const d = { ...(s.study.scPlanDone || {}) }; if (d[label]) delete d[label]; else d[label] = true; return { ...s, study: { ...s.study, scPlanDone: d } }; });
       const setScNote = (label, txt) => setState((s) => ({ ...s, study: { ...s.study, scNotes: { ...(s.study.scNotes || {}), [label]: txt } } }));
       const togglePmpWeek = (label) => setState((s) => { const d = { ...(s.study.pmpPlanDone || {}) }; if (d[label]) delete d[label]; else d[label] = true; return { ...s, study: { ...s.study, pmpPlanDone: d } }; });
@@ -2941,6 +2974,7 @@ const { useState, useEffect, useRef } = React;
                     { key: "pmp", icon: "📋", name: "PMP", plan: PMP_WEEKS, wk: cur(PMP_WEEKS), sub: findSub(/^PMP$/i), go: "pmp" },
                     { key: "amp", icon: "⚡", name: "AMP", plan: AMP_WEEKS, wk: cur(AMP_WEEKS), sub: findSub(/^AMP$/i), go: "ampplan" },
                     { key: "sc", icon: "🎯", name: "Strat Comm", plan: SC_WEEKS, wk: cur(SC_WEEKS), sub: findSub(/strat/i), go: "scplan" },
+                    { key: "fn", icon: "📐", name: "Functions", plan: FSM_WEEKS, wk: cur(FSM_WEEKS), sub: findSub(/function/i), go: "fnplan" },
                   ];
                   const todayPlan = (state.study.scheduleNotes || {})[T0] || "";
                   const daysToExam = Math.round((new Date(((state.study.pmp || {}).examDate || "2026-11-14") + "T12:00:00") - new Date(T0 + "T12:00:00")) / 86400000);
@@ -2982,8 +3016,8 @@ const { useState, useEffect, useRef } = React;
                   const moreOpen = studyMore || moreKeys.includes(studySub);
                   return (<>
                     <p style={{ ...miniLabel, margin: "0 0 4px 4px" }}>GOALS</p>
-                    <div style={{ display: "flex", gap: 6, background: C.paper, border: `1px solid ${C.line}`, borderRadius: 12, padding: 4, marginBottom: 8 }}>
-                      {chip("pmp", "📋 PMP", C.navy)}{chip("ampplan", "⚡ AMP", C.navy)}{chip("scplan", "🎯 Strat Comm", C.navy)}
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6, background: C.paper, border: `1px solid ${C.line}`, borderRadius: 12, padding: 4, marginBottom: 8 }}>
+                      {chip("pmp", "📋 PMP", C.navy)}{chip("ampplan", "⚡ AMP", C.navy)}{chip("scplan", "🎯 Strat Comm", C.navy)}{chip("fnplan", "📐 Functions", C.navy)}
                     </div>
                     <p style={{ ...miniLabel, margin: "0 0 4px 4px" }}>TOOLS</p>
                     <div style={{ display: "flex", flexWrap: "wrap", gap: 6, background: C.paper, border: `1px solid ${C.line}`, borderRadius: 12, padding: 4, marginBottom: moreOpen ? 6 : 12 }}>
@@ -2995,7 +3029,7 @@ const { useState, useEffect, useRef } = React;
                         {chip("history", "History")}{chip("subjects", "Subjects")}{chip("mitplan", "MIT (archive)")}
                       </div>
                     )}
-                    {["pmp", "ampplan", "scplan"].includes(studySub) && (() => {
+                    {["pmp", "ampplan", "scplan", "fnplan"].includes(studySub) && (() => {
                       const raw = (state.study.links || {})[studySub] || "";
                       const items = raw.split("\n").map((l) => l.split("|").map((x) => x.trim())).filter((a) => a[0]);
                       const go = (url) => { if (!url || url === "paste-your-link-here") { setLinksEdit(true); return; } if (url === "#practice") { try { window.dispatchEvent(new CustomEvent("lc:goto", { detail: "practice" })); } catch (e) {} return; } window.open(url, "_blank", "noopener"); };
@@ -3019,13 +3053,20 @@ const { useState, useEffect, useRef } = React;
                         {linksEdit && <p style={{ fontFamily: "'Hanken Grotesk', sans-serif", fontSize: 11, color: C.soft, margin: "4px 0 0" }}>One per line: <b>Label | URL</b></p>}
                       </div>);
                     })()}
-                    {studySub === "pmp" && (
-                      <div style={{ display: "flex", gap: 6, marginBottom: 12 }}>
-                        {[["hq", "Readiness & checklist"], ["plan", "Week-by-week plan"]].map(([k, lbl]) => (
-                          <button key={k} onClick={() => setPmpTab(k)} style={{ flex: 1, padding: "7px 8px", borderRadius: 9, cursor: "pointer", fontFamily: "'Hanken Grotesk', sans-serif", fontWeight: 700, fontSize: 12, border: `1px solid ${pmpTab === k ? C.navy : C.line}`, background: pmpTab === k ? C.navy : "transparent", color: pmpTab === k ? "#fff" : C.soft }}>{lbl}</button>
-                        ))}
-                      </div>
-                    )}
+                    {studySub === "pmp" && (() => {
+                      /* v7.51: one flat row — was HQ/Plan toggle + a second row of five inside HQ */
+                      const errN = (((state.study && state.study.pmp) || {}).errors || []).filter((e) => !e.reviewed).length;
+                      const items = [["overview", "Overview"], ["plan", "Roadmap"], ["week", "Weekly plan"], ["plog", "Log"], ["errors", "Errors" + (errN ? " (" + errN + ")" : "")], ["ref", "Reference"]];
+                      const cur = pmpTab === "plan" ? "week" : pmpView;
+                      const go = (k) => { if (k === "week") setPmpTab("plan"); else { setPmpTab("hq"); setPmpView(k); } };
+                      return (
+                        <div style={{ display: "flex", gap: 4, marginBottom: 12, flexWrap: "wrap" }}>
+                          {items.map(([k, lbl]) => (
+                            <button key={k} onClick={() => go(k)} style={{ ...tabBtn(cur === k), flex: "1 1 30%", padding: "7px 4px", fontSize: 11.5 }}>{lbl}</button>
+                          ))}
+                        </div>
+                      );
+                    })()}
                   </>);
                 })()}
 
@@ -3066,6 +3107,7 @@ const { useState, useEffect, useRef } = React;
                         { icon: "📋", name: "PMP", weeks: PMP_WEEKS, sub: find(/^PMP$/i, "su4") },
                         { icon: "⚡", name: "AMP", weeks: AMP_WEEKS, sub: find(/^AMP$/i, "su5") },
                         { icon: "🎯", name: "Strat Comm", weeks: SC_WEEKS, sub: find(/strat/i, "su6") },
+                        { icon: "📐", name: "Functions", weeks: FSM_WEEKS, sub: find(/function/i, "su7") },
                       ].filter((r) => r.sub.id);
                       if (!rows.length) return null;
                       return (<div style={{ ...card, marginBottom: 12 }}>
@@ -3491,6 +3533,67 @@ const { useState, useEffect, useRef } = React;
                   </>);
                 })()}
 
+                {studySub === "fnplan" && (() => {
+                  const fnSub = subjects.find((su) => su.id === "su7") || subjects.find((su) => /function/i.test(su.name));
+                  const weekHrs = (wk) => fnSub ? (state.study.sessions || []).filter((x) => x.subjectId === fnSub.id && sessDate(x) >= wk.s && sessDate(x) <= wk.e).reduce((a, x) => a + sessHrs(x), 0) : 0;
+                  const totalPlanned = FSM_WEEKS.reduce((a, w) => a + w.t, 0);
+                  const totalLogged = fnSub ? subjTotalHrs(fnSub.id) : 0;
+                  const done = state.study.fsmDone || {};
+                  const today = todayStr();
+                  const totalCells = FSM_FUNCS.length * FSM_LEVELS.length;
+                  const doneCells = FSM_FUNCS.reduce((a, f) => a + FSM_LEVELS.filter((n) => done[f.k + ":" + n]).length, 0);
+                  const cellPct = totalCells > 0 ? (doneCells / totalCells) * 100 : 0;
+                  const paused = FSM_WEEKS.find((w) => w.w === "PAUSE");
+                  const inPause = paused && today >= paused.s && today <= paused.e;
+                  return (<>
+                    <div style={{ ...card, marginBottom: 10 }}>
+                      <p style={{ ...miniLabel, marginTop: 0, marginBottom: 8 }}>EXCEL FUNCTIONS CHALLENGE · FULL STACK MODELLER · 6 WORKBOOKS × 8 LEVELS</p>
+                      <div style={{ display: "flex", justifyContent: "space-between", fontFamily: "'DM Mono', monospace", fontSize: 11, color: C.soft, marginBottom: 4 }}><span>{doneCells} / {totalCells} levels cleared</span><span>{Math.round(cellPct)}%</span></div>
+                      <div style={{ height: 7, background: C.bg, borderRadius: 4, overflow: "hidden" }}><div style={{ height: "100%", width: cellPct + "%", background: C.navy, borderRadius: 4 }} /></div>
+                      <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 10, color: C.faint, marginTop: 6 }}>{totalLogged.toFixed(1)} / {totalPlanned}h logged · {inPause ? "paused for the PMP final push" : "active"}</div>
+                    </div>
+                    {inPause ? (
+                      <div style={{ ...card, marginBottom: 10, padding: "8px 12px", background: "rgba(201,162,39,.14)", border: `1px solid ${C.gold}` }}>
+                        <span style={{ fontFamily: "'DM Mono', monospace", fontSize: 10.5, color: C.ink }}>⏸ PAUSED {prettyDate(paused.s)} – {prettyDate(paused.e)} — no hours expected. Levels still tick if you do them.</span>
+                      </div>
+                    ) : null}
+                    <div style={{ ...card, marginBottom: 10, border: `1px dashed ${C.navy}` }}>
+                      <p style={{ ...miniLabel, margin: "0 0 6px", color: C.navy }}>WHY THIS ONE EARNS ITS PLACE</p>
+                      <p style={{ fontFamily: "'Hanken Grotesk', sans-serif", fontSize: 12.5, color: C.ink, margin: 0, lineHeight: 1.5 }}>FILTER, UNIQUE and INDEX are the spill-safe replacements for the array patterns you work around today. Every level cleared here is one fewer SUMPRODUCT workaround in a model somebody else has to run without you.</p>
+                    </div>
+                    {FSM_FUNCS.map((f) => {
+                      const cnt = FSM_LEVELS.filter((n) => done[f.k + ":" + n]).length;
+                      const allDone = cnt === FSM_LEVELS.length;
+                      return (<div key={f.k} style={{ ...card, marginBottom: 6, padding: "10px 12px", border: allDone ? `1.5px solid ${C.sage}` : `1px solid ${C.line}`, opacity: allDone ? 0.78 : 1 }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8, marginBottom: 5 }}>
+                          <span style={{ fontFamily: "'Hanken Grotesk', sans-serif", fontWeight: 700, fontSize: 14 }}>{f.icon} {f.k}</span>
+                          <span style={{ fontFamily: "'DM Mono', monospace", fontSize: 10.5, color: allDone ? C.sage : C.soft, flexShrink: 0 }}>{cnt}/{FSM_LEVELS.length}{allDone ? " ✓" : ""}</span>
+                        </div>
+                        <div style={{ fontFamily: "'Hanken Grotesk', sans-serif", fontSize: 12, color: C.soft, marginBottom: 8, lineHeight: 1.4 }}>{f.note}</div>
+                        <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
+                          {FSM_LEVELS.map((n) => { const on = !!done[f.k + ":" + n];
+                            return (<button key={n} onClick={() => toggleFsm(f.k, n)} aria-label={f.k + " level " + n} title={"Level " + n} style={{ width: 34, height: 31, borderRadius: 7, cursor: "pointer", border: `1.5px solid ${on ? C.sage : C.faint}`, background: on ? C.sage : "transparent", color: on ? "#fff" : C.soft, fontFamily: "'DM Mono', monospace", fontSize: 11.5, fontWeight: 700 }}>{n}</button>);
+                          })}
+                        </div>
+                      </div>);
+                    })}
+                    <p style={{ ...miniLabel, margin: "14px 0 6px 4px" }}>PLAN</p>
+                    {FSM_WEEKS.map((wk) => {
+                      const isNow = today >= wk.s && today <= wk.e;
+                      const isSkip = wk.w === "PAUSE";
+                      const ah = weekHrs(wk);
+                      const hc = wk.t > 0 ? (ah >= wk.t ? C.sage : (ah > 0 ? "#A9822F" : C.faint)) : C.faint;
+                      return (<div key={wk.w} style={{ ...card, marginBottom: 6, padding: "9px 12px", border: isNow ? `1.5px solid ${C.ember}` : (isSkip ? `1px dashed ${C.faint}` : `1px solid ${C.line}`), opacity: isSkip ? 0.85 : 1 }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8 }}>
+                          <span style={{ fontFamily: "'Hanken Grotesk', sans-serif", fontWeight: 700, fontSize: 13, color: isSkip ? C.ember : C.ink }}>{isSkip ? "⏸ " : ""}{wk.w}{isNow ? " · now" : ""}</span>
+                          <span style={{ fontFamily: "'DM Mono', monospace", fontSize: 10, color: hc, flexShrink: 0 }}>{wk.t > 0 ? ah.toFixed(1) + " / " + wk.t + "h" : "—"}</span>
+                        </div>
+                        <div style={{ fontFamily: "'Hanken Grotesk', sans-serif", fontSize: 12, color: C.soft, marginTop: 2, lineHeight: 1.4 }}>{wk.m}</div>
+                      </div>);
+                    })}
+                    <p style={{ fontFamily: "'DM Mono', monospace", fontSize: 9, color: C.faint, margin: "8px 0 0", lineHeight: 1.5 }}>Levels are marked by hand — the course platform has no API. Hours come from the timer against the Excel Functions subject. Weekly targets are a placeholder: edit FSM_WEEKS.</p>
+                  </>);
+                })()}
                 {studySub === "scplan" && (() => {
                   const scSub = subjects.find((su) => su.id === "su6") || subjects.find((su) => /strat/i.test(su.name));
                   const weekHrs = (wk) => scSub ? (state.study.sessions || []).filter((x) => x.subjectId === scSub.id && sessDate(x) >= wk.s && sessDate(x) <= wk.e).reduce((a, x) => a + sessHrs(x), 0) : 0;
@@ -3704,11 +3807,6 @@ const { useState, useEffect, useRef } = React;
                   ];
                   return (
                     <>
-                      <div style={{ display: "flex", gap: 6, marginBottom: 12 }}>
-                        {[["overview", "Overview"], ["plan", "Plan"], ["plog", "Log"], ["errors", "Errors" + (unreviewed.length ? " (" + unreviewed.length + ")" : "")], ["ref", "Reference"]].map(([k, lbl]) => (
-                          <button key={k} onClick={() => setPmpView(k)} style={{ ...tabBtn(pmpView === k), flex: 1, padding: "7px 4px", fontSize: 11.5 }}>{lbl}</button>
-                        ))}
-                      </div>
 
                       {pmpView === "overview" && (
                         <>
@@ -5224,7 +5322,7 @@ const { useState, useEffect, useRef } = React;
     const TABLE         = "hundred_days";
     const USER_KEY      = "linda";              // any fixed label; names your single saved row
     const ANALYZE_URL   = "https://hundred-days-analyze.lesteps24.workers.dev/";                   // your trends Worker
-    const APP_VERSION   = "v3.94 · 2026-09-19";  // bump this each update so you can confirm a deploy
+    const APP_VERSION   = "v3.96 · 2026-09-27";  // bump this each update so you can confirm a deploy
     const DEMO_URL      = "https://www.instagram.com/reel/DWACMUODNN1/";  // Movement routine demo
     /* ============================================================ */
 
@@ -5339,6 +5437,14 @@ const { useState, useEffect, useRef } = React;
     const planLabel = (p) => (p === "lift" ? "Lift · 20 min strength" : p === "cardio" ? "Cardio · 30 min (a walk counts)" : p === "both" ? "Lift + Cardio" : "Rest day");
     // Water defaults: a 500 ml Fiji bottle = 16.9 fl oz. Presets are in bottles; the log still stores oz.
     const BOTTLE_OZ = 16.9;
+    // v3.95 tab layout. "sources" expands to HEALTH_SOURCES. Hidden tabs are state.hiddenViews (Settings → Tabs).
+    const HEALTH_TAB_ROWS = [
+      [["today", "Today"], ["sleep", "Sleep"], ["water", "Water"], ["nutrition", "Nutrition"], ["supp", "Supplements"]],
+      [["morning", "Movement"], ["steps", "Steps"], ["reset", "Reset"], ["invis", "Invisalign"]],
+      [["progress", "Progress"], ["beforeafter", "Metrics"], ["labs", "Labs"], ["notes", "Notes"], ["sources", "Sources"]],
+    ];
+    const HEALTH_SOURCES = [["withings", "Withings"], ["oura", "Oura"], ["whoop", "Whoop"], ["strava", "Strava"]];
+    const HEALTH_ALL_TABS = [...HEALTH_TAB_ROWS.flat().filter(([k]) => k !== "sources" && k !== "today"), ...HEALTH_SOURCES];
     // Editable in Settings → Water quick-add (stored as state.waterPresets). Decimals allowed.
     const DEFAULT_WATER_PRESETS = [
       { oz: 16.9, label: "1 bottle", note: "Fiji 500 ml" },
@@ -5599,6 +5705,7 @@ const { useState, useEffect, useRef } = React;
       if (!Array.isArray(merged.supplements)) merged.supplements = def.supplements;
       if (!merged.supplementLog || typeof merged.supplementLog !== "object") merged.supplementLog = {};
       if (!merged.nutritionLog || typeof merged.nutritionLog !== "object") merged.nutritionLog = {};
+      if (!Array.isArray(merged.hiddenViews)) merged.hiddenViews = [];   // v3.95: tabs hidden in Settings → Tabs
       if (!Array.isArray(merged.resetMoves) || merged.resetMoves.length === 0) merged.resetMoves = def.resetMoves;
       merged.resetMoves = merged.resetMoves.map((m) => ({ id: m.id, name: m.name, secs: typeof m.secs === "number" ? m.secs : 60 }));
       if (typeof merged.resetRest !== "number") merged.resetRest = def.resetRest;
@@ -5627,6 +5734,8 @@ const { useState, useEffect, useRef } = React;
       const [session, setSession] = useState(CONFIGURED ? undefined : null); // undefined=checking, null=logged out
       const [status, setStatus] = useState(CONFIGURED ? "loading" : "demo");
       const [view, setView] = useState("today");
+      const lastSource = useRef("withings");   // which device tab the Sources chip opens
+      useEffect(() => { if (state && (state.hiddenViews || []).includes(view)) setView("today"); }, [state && state.hiddenViews, view]);
       const [ouraSyncing, setOuraSyncing] = useState(false);
       const [ouraMsg, setOuraMsg] = useState("");
       const [ouraRange, setOuraRange] = useState(14);
@@ -6923,21 +7032,34 @@ const { useState, useEffect, useRef } = React;
             <Stat label="DONE %" value={pct} suffix="%" />
           </div>
 
-          {/* tabs — grouped into fixed lines */}
-          <div style={{ marginBottom: 14, background: C.paper, border: `1px solid ${C.line}`, borderRadius: 12, padding: 4 }}>
-            {[
-              [["today", "Today"], ["sleep", "Sleep"], ["water", "Water"], ["nutrition", "Nutrition"], ["supp", "Supplements"]],
-              [["invis", "Invisalign"], ["morning", "Movement"], ["reset", "Reset"], ["steps", "Steps"]],
-              [["progress", "Progress"], ["beforeafter", "Metrics"], ["notes", "Notes"]],
-              [["oura", "Oura"], ["withings", "Withings"], ["whoop", "Whoop"], ["strava", "Strava"], ["labs", "Labs"]],
-            ].map((rowTabs, ri) => (
-              <div key={ri} style={{ display: "flex", gap: 6, marginTop: ri ? 6 : 0 }}>
-                {rowTabs.map(([k, lbl]) => (
-                  <button key={k} onClick={() => setView(k)} style={{ ...tabBtn(view === k), flex: 1 }}>{lbl}</button>
+          {/* tabs — v3.95: the four device tabs live under one "Sources" chip; any chip can be hidden in Settings → Tabs */}
+          {(() => {
+            const hidden = state.hiddenViews || [];
+            const isSrc = (k) => HEALTH_SOURCES.some(([sk]) => sk === k);
+            const rows = HEALTH_TAB_ROWS.map((r) => r.filter(([k]) => !hidden.includes(k))).filter((r) => r.length);
+            const srcChips = HEALTH_SOURCES.filter(([k]) => !hidden.includes(k));
+            const srcActive = isSrc(view);
+            return (
+              <div style={{ marginBottom: 14, background: C.paper, border: `1px solid ${C.line}`, borderRadius: 12, padding: 4 }}>
+                {rows.map((rowTabs, ri) => (
+                  <div key={ri} style={{ display: "flex", gap: 6, marginTop: ri ? 6 : 0 }}>
+                    {rowTabs.map(([k, lbl]) => (
+                      k === "sources"
+                        ? (srcChips.length ? <button key={k} onClick={() => setView(lastSource.current)} style={{ ...tabBtn(srcActive), flex: 1 }}>Sources {srcActive ? "▾" : "▸"}</button> : null)
+                        : <button key={k} onClick={() => setView(k)} style={{ ...tabBtn(view === k), flex: 1 }}>{lbl}</button>
+                    ))}
+                  </div>
                 ))}
+                {srcActive && (
+                  <div style={{ display: "flex", gap: 6, marginTop: 6, paddingTop: 6, borderTop: `1px dashed ${C.line}` }}>
+                    {srcChips.map(([k, lbl]) => (
+                      <button key={k} onClick={() => { lastSource.current = k; setView(k); }} style={{ ...tabBtn(view === k), flex: 1, fontSize: 12 }}>{lbl}</button>
+                    ))}
+                  </div>
+                )}
               </div>
-            ))}
-          </div>
+            );
+          })()}
 
           {/* TODAY */}
           {view === "today" && (
@@ -6995,9 +7117,9 @@ const { useState, useEffect, useRef } = React;
                 const done = (need.lift ? liftDone : true) && (need.cardio ? cardioDone : true);
                 const parts = []; if (need.lift) parts.push(liftDone ? "Lift ✓" : "Lift"); if (need.cardio) parts.push(cardioDone ? "Cardio ✓" : "Cardio");
                 return (
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, background: p === "rest" ? C.bg : (done ? "#EEF4EC" : "#FBF3E4"), border: `1px solid ${p === "rest" ? C.line : (done ? C.sage : "#E5CFA0")}`, borderRadius: 9, padding: "8px 11px", marginBottom: 10 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, background: done ? "#EEF4EC" : "#FBF3E4", border: `1px solid ${done ? C.sage : "#E5CFA0"}`, borderRadius: 9, padding: "8px 11px", marginBottom: 10 }}>
                     <span style={{ fontFamily: "'DM Mono', monospace", fontSize: 9.5, letterSpacing: 1, textTransform: "uppercase", color: C.soft, flexShrink: 0 }}>Today's plan</span>
-                    <span style={{ fontFamily: "'Hanken Grotesk', sans-serif", fontSize: 13, fontWeight: 700, color: p === "rest" ? C.soft : (done ? C.sage : C.ink), textAlign: "right" }}>{p === "rest" ? "Rest day" : (parts.join(" + ") + (done ? " — done" : (p === "lift" ? " · 20 min strength" : p === "cardio" ? " · 30 min, a walk counts" : "")))}</span>
+                    <span style={{ fontFamily: "'Hanken Grotesk', sans-serif", fontSize: 13, fontWeight: 700, color: done ? C.sage : C.ink, textAlign: "right" }}>{p === "rest" ? "Rest day — plan followed ✓" : (parts.join(" + ") + (done ? " — done" : (p === "lift" ? " · 20 min strength" : p === "cardio" ? " · 30 min, a walk counts" : "")))}</span>
                       </div>
                     );
                   })()}
@@ -8937,6 +9059,16 @@ const { useState, useEffect, useRef } = React;
           {/* settings sheet */}
           {showSettings && (
             <Sheet onClose={() => setShowSettings(false)} title="Goals & settings">
+              <p style={miniLabel}>TABS</p>
+              <p style={{ fontFamily: "'Hanken Grotesk', sans-serif", fontSize: 12, color: C.soft, margin: "0 0 8px", lineHeight: 1.45 }}>Hide tabs you are not using. Nothing is deleted — hidden tabs keep logging and come back when you turn them on.</p>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 14 }}>
+                {HEALTH_ALL_TABS.map(([k, lbl]) => { const on = !(state.hiddenViews || []).includes(k); return (
+                  <button key={k} onClick={() => setState((s) => { const h = new Set(s.hiddenViews || []); if (on) h.add(k); else h.delete(k); return { ...s, hiddenViews: Array.from(h) }; })}
+                    style={{ padding: "6px 10px", borderRadius: 8, border: `1px solid ${on ? C.ink : C.line}`, background: on ? C.ink : "transparent", color: on ? C.paper : C.soft, fontFamily: "'Hanken Grotesk', sans-serif", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>
+                    {on ? "✓ " : ""}{lbl}
+                  </button>
+                ); })}
+              </div>
               <p style={miniLabel}>WATER QUICK-ADD BUTTONS</p>
               <p style={{ fontFamily: "'Hanken Grotesk', sans-serif", fontSize: 12, color: C.soft, margin: "0 0 8px", lineHeight: 1.45 }}>The one-tap amounts on the water card. First one is the highlighted default. Decimals are fine — set them to what you actually drink. Up to 4.</p>
               {(state.waterPresets || DEFAULT_WATER_PRESETS).map((p, i) => (
@@ -13226,6 +13358,7 @@ async function lcSha256(txt) {
 }
 // Tabs that ask for the PIN. Add "health" or "time" here if you want them covered too.
 const LOCKED_TABS = ["practice", "muse", "streak"];
+const LOCK_IDLE_MS = 15 * 60 * 1000;   // v7.52 — one unlock covers every locked tab until 15 minutes idle
 
 function LockScreen({ onUnlock }) {
   const C = { paper: "#FBF7EE", ink: "#211D17", soft: "#7A6F5E", faint: "#CFC4AE", line: "#DCD2BD", ember: "#C8492A" };
@@ -13264,7 +13397,8 @@ function Shell() {
   const [remote, setRemote] = useState({});
   const [estOpen, setEstOpen] = useState(false);
   const [lockPin, setLockPin] = useState(undefined);   // undefined = not loaded, "unknown" = read failed
-  const [unlockedTab, setUnlockedTab] = useState(null);
+  const unlockRef = React.useRef(0);                   // epoch ms the unlock lapses; 0 = locked
+  const [, setLockTick] = useState(0);                 // ticks only on unlock / lock / expiry, never on a click
   useEffect(() => {
     let on = true;
     (async () => {
@@ -13278,16 +13412,25 @@ function Shell() {
     })();
     return () => { on = false; };
   }, []);
-  useEffect(() => { setUnlockedTab(null); }, [mode]);   // relock on every tab change
   const tryUnlock = async (h) => {
     let stored = (lockPin && lockPin !== "unknown") ? lockPin : null;
     if (!stored) {
       try { const { data } = await window.__SB.from("app_lock").select("passcode_hash").eq("id", "linda").maybeSingle(); stored = (data && data.passcode_hash) || null; if (stored) setLockPin(stored); } catch (e) {}
     }
-    if (stored && h === stored) { setUnlockedTab(mode); return true; }
+    if (stored && h === stored) { unlockRef.current = Date.now() + LOCK_IDLE_MS; setLockTick((t) => t + 1); return true; }
     return false;
   };
-  const locked = LOCKED_TABS.includes(mode) && unlockedTab !== mode;
+  const locked = LOCKED_TABS.includes(mode) && Date.now() >= unlockRef.current;
+  /* One unlock covers every locked tab and survives tab changes; it lapses after LOCK_IDLE_MS of no
+     input. Bumping the deadline touches a ref, not state, so a click never re-renders the shell —
+     the interval is the only thing that re-renders, and only to let an expiry take effect. */
+  useEffect(() => {
+    const bump = () => { if (unlockRef.current && Date.now() < unlockRef.current) unlockRef.current = Date.now() + LOCK_IDLE_MS; };
+    const evs = ["pointerdown", "keydown"];
+    evs.forEach((e) => window.addEventListener(e, bump, { passive: true }));
+    const iv = setInterval(() => { if (unlockRef.current && Date.now() >= unlockRef.current) { unlockRef.current = 0; setLockTick((t) => t + 1); } }, 15000);
+    return () => { evs.forEach((e) => window.removeEventListener(e, bump)); clearInterval(iv); };
+  }, []);
   useEffect(() => {
     let on = true;
     (async () => { try { if (window.__SB) { const { data } = await window.__SB.from("app_usage").select("state").eq("id", "linda").maybeSingle(); if (on && data && data.state && data.state.devices) setRemote(data.state.devices); } } catch (e) {} })();
@@ -13356,7 +13499,7 @@ function Shell() {
         <button onClick={() => pick("muse")} style={seg(mode === "muse")}>◐ Muse</button>
         <button onClick={() => pick("streak")} style={seg(mode === "streak")}>🏆 Streaks</button>
         <button onClick={() => pick("practice")} style={seg(mode === "practice")}>🎯 Practice</button>
-        {LOCKED_TABS.includes(mode) && !locked ? <button onClick={() => setUnlockedTab(null)} title="lock now" style={{ ...seg(false), flex: "0 0 auto", padding: "9px 10px" }}>🔒</button> : null}
+        {LOCKED_TABS.includes(mode) && !locked ? <button onClick={() => { unlockRef.current = 0; setLockTick((t) => t + 1); }} title="lock now" style={{ ...seg(false), flex: "0 0 auto", padding: "9px 10px" }}>🔒</button> : null}
       </div>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginTop: 7, padding: "0 3px", flexWrap: "wrap" }}>
         <span style={{ fontFamily: "'DM Mono', monospace", fontSize: 10.5, color: C.soft }}>⏳ {_fmt(_todaySecs)} in app today{_n > 1 ? " · " + _fmt(_avgSecs) + " avg" : ""}</span>
