@@ -85,7 +85,7 @@ const { useState, useEffect, useRef } = React;
     const SUPABASE_ANON  = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNsd2xuYnp4cmFpYXZwY2pidml5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQyMzg5NjksImV4cCI6MjA4OTgxNDk2OX0.-r80YRrZG2us0kQwFpo0IKbmYX45VsF8TFFnYPT3qsM";
     const TABLE         = "quick_log";
     const USER_KEY      = "linda";
-    const APP_VERSION   = "v7.59 · 2026-09-27";
+    const APP_VERSION   = "v7.61 · 2026-09-27";
     const TIME_ANALYZE_URL = "https://le-cadence-analyze.lesteps24.workers.dev/";
     const IDLE_GOAL_HRS = 1;   // target: no more than 1 hour of idle / TV per day
     const SESSION_TYPES = ["Study", "Class", "Quiz/Test", "Project", "Other"];
@@ -13452,7 +13452,7 @@ const PracticeApp = (function () {
 const TodayApp = (function () {
   const { useState, useEffect, useRef } = React;
   const sb = (typeof window !== "undefined" && window.__SB) ? window.__SB : null;
-  const APP_VERSION = "v1.4 · 2026-09-27";
+  const APP_VERSION = "v1.6 · 2026-09-27";
   const RUN_FROM = "2026-09-28";        // the run counts from this day — Linda's reset for Sept 28
   const STUDY_TARGET_MIN = 120;         // 2 h/day is the bar; 3 h is the stretch shown in the detail
   const STUDY_STRETCH_MIN = 180;
@@ -13465,14 +13465,15 @@ const TodayApp = (function () {
   const toStr = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
   const todayStr = () => toStr(new Date());
   const addDays = (ds, n) => { const [y, m, d] = ds.split("-").map(Number); const x = new Date(y, m - 1, d + n); return toStr(x); };
+  const parseDs = (ds) => { const [y, m, d] = ds.split("-").map(Number); return new Date(y, m - 1, d).getTime(); };
   const dowOf = (ds) => { const [y, m, d] = ds.split("-").map(Number); return new Date(y, m - 1, d).getDay(); };
   const DOW = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
   const visits = () => { try { return JSON.parse(window.localStorage.getItem("lc_visits") || "{}"); } catch (e) { return {}; } };
   const visited = (ds, tab) => !!((visits()[ds] || {})[tab]);
 
   /* ---- derive the day's facts from the two rows ---- */
-  function facts(ds, hd, ql) {
-    hd = hd || {}; ql = ql || {}; const st = ql.study || {};
+  function facts(ds, hd, ql, mu) {
+    hd = hd || {}; ql = ql || {}; mu = mu || {}; const st = ql.study || {};
     const w = ((hd.withings && hd.withings.days) || []).find((d) => d.day === ds) || null;
     const water = ((hd.waterLog || {})[ds] || []);
     const waterOz = water.reduce((a, e) => a + (Number(e.oz) || 0), 0);
@@ -13508,10 +13509,27 @@ const TodayApp = (function () {
     // supplements: all listed taken
     const supps = hd.supplements || []; const sl = (hd.supplementLog || {})[ds] || {};
     const suppN = supps.filter((x) => sl[x.id]).length;
+    // v1.5 — morning routine, blood pressure, steps vs ramp goal, workout per plan, Muse
+    const morningDone = !!((hd.morningLog || {})[ds]);
+    const bp = w && w.systolic != null && w.diastolic != null ? `${w.systolic}/${w.diastolic}` : null;
+    const rampList = (Array.isArray(hd.stepsRamp) ? hd.stepsRamp : []).filter((r) => r && /^\d{4}-\d{2}-\d{2}$/.test(r.from) && Number(r.goal) > 0).sort((a, b) => (a.from < b.from ? -1 : 1));
+    let stepsGoal = null; rampList.forEach((r) => { if (r.from <= ds) stepsGoal = Number(r.goal); });
+    if (stepsGoal == null) stepsGoal = Number(hd.stepsGoalPreRamp) || Number(hd.stepsGoal) || 10000;
+    const stepsOv = (hd.stepsOverride || {})[ds];
+    const stepsN = stepsOv != null ? stepsOv : (w && w.steps != null ? w.steps : null);
+    const stravaToday = ((hd.strava && hd.strava.workouts) || []).filter((x) => x && x.day === ds && !x.ignored);
+    const liftDone = !!comp.h4, cardioDone = !!comp.h_cardio;
+    const stravaNames = stravaToday.map((x) => x.name || x.type).filter(Boolean).join(", ").slice(0, 40);
+    const museToday = ((mu.sessions || []).some((x) => x && x.date === ds));
+    // periodic: last trends analysis (Health → Insights) and last lab draw
+    const lastTrends = ((hd.analysisLog || []).map((x) => Number(x.ts) || 0).sort((a, b) => b - a)[0]) || 0;
+    const lastLab = ((hd.labs || []).map((x) => x.date).filter(Boolean).sort().reverse()[0]) || null;
+    const lastScan = ((hd.measurements || []).map((x) => x.date).filter(Boolean).sort().reverse()[0]) || null;
     // v1.3: Withings days carry weightLb / weightKg (not "weight") — this is why the Sept 27 weigh-in never ticked
     const wU = (hd.weightUnit || "lb") === "kg" ? "kg" : "lb";
     const wVal = !w ? null : wU === "kg" ? (w.weightKg != null ? w.weightKg : (w.weightLb != null ? Math.round(w.weightLb / 2.20462 * 10) / 10 : null)) : (w.weightLb != null ? w.weightLb : (w.weightKg != null ? Math.round(w.weightKg * 2.20462 * 10) / 10 : null));
-    return { wholeDone, wholeAll, wholeN, sugar: !!nut.sugar, fastDone, fastMin, fastGoal, invHrs, invGoal, invAny: !!inv, suppN, suppTotal: supps.length, waterGoal, weight: wVal, steps: w && w.steps != null ? w.steps : null, waterOz, waterN: water.length,
+    return { morningDone, bp, stepsGoal, stepsN, stepsOv: stepsOv != null, liftDone, cardioDone, stravaNames, museToday, lastTrends, lastLab, lastScan,
+      wholeDone, wholeAll, wholeN, sugar: !!nut.sugar, fastDone, fastMin, fastGoal, invHrs, invGoal, invAny: !!inv, suppN, suppTotal: supps.length, waterGoal, weight: wVal, steps: w && w.steps != null ? w.steps : null, waterOz, waterN: water.length,
       lunch: !!(nut.lunch || nut.lFood), lunchTxt: nut.lFood || nut.lunch || "", dinner: !!(nut.dinner || nut.dFood), dinnerTxt: nut.dFood || nut.dinner || "",
       stopped: nut.stoppedTonight || "", studyMin, subjects, errs, qsets: qsets.length, drilled, plan, nextWeekPlanned, weightUnit: wU };
   }
@@ -13522,18 +13540,27 @@ const TodayApp = (function () {
     const planTxt = f.plan === "rest" ? "Rest day" : f.plan === "both" ? "Lift + cardio" : f.plan === "lift" ? "Lift" : "Cardio";
     const S = [];
     S.push({ block: "Morning", id: "weigh", label: "Step on the Withings scale", core: true, done: f.weight != null, detail: f.weight != null ? `${f.weight} ${f.weightUnit} synced` : "waiting for Withings", go: ["health", "withings"] });
+    S.push({ block: "Morning", id: "morning", label: "Morning reset — total-body stretches", core: true, done: f.morningDone, detail: f.morningDone ? "Completed from Morning routine" : "Health → Movement, run the routine", go: ["health", "morning"] });
+    S.push({ block: "Morning", id: "bp", label: "Blood pressure check", core: false, optional: true, done: !!f.bp, detail: f.bp ? `${f.bp} · from Withings` : "cuff reading not synced yet", go: ["health", "withings"] });
     S.push({ block: "Morning", id: "read", label: `Read Health → Today (${planTxt})`, core: false, done: visited(ds, "health"), detail: visited(ds, "health") ? "opened today" : "read only — plan banner and This Week card", go: ["health", "today"] });
     // water: three checkpoints against the daily goal, finished by afternoon so nothing is drunk late. Only the last is core.
     const oz = Math.round(f.waterOz), g = f.waterGoal, third = Math.ceil(g / 3), twoThirds = Math.ceil(g * 2 / 3);
     const wd = (need) => `${oz} of ${g} oz` + (oz >= need ? "" : ` · ${need - oz} more for this checkpoint`);
     S.push({ block: "Morning", id: "water1", label: `Water — ${third} oz by noon`, core: false, optional: true, done: oz >= third, detail: wd(third), go: ["health", "water"] });
     S.push({ block: "Noon", id: "water2", label: `Water — ${twoThirds} oz by mid-afternoon`, core: false, optional: true, done: oz >= twoThirds, detail: wd(twoThirds), go: ["health", "water"] });
+    S.push({ block: "Afternoon", id: "walk", label: `Walk — ${f.stepsGoal.toLocaleString()} steps (today's ramp goal)`, core: true, done: f.stepsN != null && f.stepsN >= f.stepsGoal, detail: f.stepsN != null ? `${f.stepsN.toLocaleString()} of ${f.stepsGoal.toLocaleString()}${f.stepsOv ? " · entered" : " · from Withings"}` : "waiting for Withings steps", go: ["health", "steps"] });
     S.push({ block: "Afternoon", id: "water3", label: `Water — ${g} oz goal, done before evening`, core: true, done: oz >= g, detail: wd(g), go: ["health", "water"] });
     S.push({ block: "Noon", id: "lunch", label: "Log lunch (Same as yesterday if it repeats)", core: false, optional: true, done: f.lunch, detail: f.lunch ? f.lunchTxt.slice(0, 40) : "optional", go: ["health", "nutrition"] });
     S.push({ block: "Morning", id: "fast", label: `Fast ${Math.round(f.fastGoal / 60)} h (from last night's stop time)`, core: true, done: f.fastDone, detail: f.fastMin != null ? `${Math.floor(f.fastMin / 60)}h ${f.fastMin % 60}m${f.fastDone ? "" : " · set 'started eating' when you break it"}` : "needs last night's stop time + today's start time", go: ["health", "nutrition"] });
     // supplements: noon dose = at least one ticked; night dose = all ticked (the log is per-supplement, not per-time)
     S.push({ block: "Noon", id: "supps1", label: "Supplements — noon dose", core: false, optional: true, done: f.suppN > 0, detail: f.suppTotal ? `${f.suppN} of ${f.suppTotal} ticked` : "none listed in Health → Supplements", go: ["health", "supp"] });
     S.push({ block: "Evening", id: "supps2", label: "Supplements — night dose (all ticked)", core: true, done: f.suppTotal > 0 && f.suppN >= f.suppTotal, detail: f.suppTotal ? `${f.suppN} of ${f.suppTotal}` : "none listed in Health → Supplements", go: ["health", "supp"] });
+    // workout per the weekday plan: lift → Resistance ticked, cardio → Cardio ticked, both → both, rest → plan followed
+    const needLift = f.plan === "lift" || f.plan === "both", needCardio = f.plan === "cardio" || f.plan === "both";
+    const woDone = f.plan === "rest" ? true : (!needLift || f.liftDone) && (!needCardio || f.cardioDone);
+    const woLabel = f.plan === "rest" ? "Rest day — plan followed" : f.plan === "both" ? "Lift + cardio (both on the plan)" : f.plan === "lift" ? "Lift weights (on the plan today)" : "Cardio (on the plan today)";
+    const woDetail = f.plan === "rest" ? "no workout scheduled" : woDone ? (f.stravaNames ? `Completed from Strava · ${f.stravaNames}` : "checked in Health") : (f.stravaNames ? `Strava: ${f.stravaNames} (not the planned type)` : "Peloton → Strava ticks it, or check the habit in Health");
+    S.push({ block: "Evening", id: "workout", label: woLabel, core: true, done: woDone, detail: woDetail, go: ["health", "today"] });
     const sh = Math.round(f.studyMin / 60 * 10) / 10;
     S.push({ block: "Evening", id: "timer", label: `Study ${STUDY_TARGET_MIN / 60} h on the timer (stretch ${STUDY_STRETCH_MIN / 60} h)`, core: true, done: f.studyMin >= STUDY_TARGET_MIN, detail: f.studyMin ? `${f.studyMin} of ${STUDY_TARGET_MIN} min${f.studyMin >= STUDY_STRETCH_MIN ? " · stretch hit" : f.studyMin >= STUDY_TARGET_MIN ? ` · ${STUDY_STRETCH_MIN - f.studyMin} to stretch` : ""}${f.subjects.length ? " · " + f.subjects.join(", ") : ""}` : "", go: ["study", "dash"] });
     S.push({ block: "Evening", id: "errors", label: "Log a question set + tag each miss", core: false, optional: true, done: f.qsets > 0 || f.errs > 0, detail: f.qsets || f.errs ? `${f.qsets} set${f.qsets === 1 ? "" : "s"} · ${f.errs} miss${f.errs === 1 ? "" : "es"} tagged` : "only if you did questions", go: ["study", "pmp", "errors"] });
@@ -13541,19 +13568,31 @@ const TodayApp = (function () {
     S.push({ block: "Evening", id: "dinner", label: "Log dinner", core: true, done: f.dinner, detail: f.dinner ? f.dinnerTxt.slice(0, 40) : "", go: ["health", "nutrition"] });
     S.push({ block: "Evening", id: "stop", label: "Set stopped-eating time", core: true, done: !!f.stopped, detail: f.stopped ? `${f.stopped} · drives tomorrow's fasting check` : "", go: ["health", "nutrition"] });
     S.push({ block: "Evening", id: "whole", label: "Whole foods all day, no processed sugar", core: true, done: f.wholeDone, detail: f.wholeDone ? (f.wholeAll ? "all 3 meals whole" : "checked") : f.sugar ? "sugar logged today" : `${f.wholeN} of 3 meals flagged whole`, go: ["health", "nutrition"] });
+    S.push({ block: "Evening", id: "muse", label: "Muse meditation", core: false, optional: true, done: f.museToday, detail: f.museToday ? "Completed from Muse" : "5×/week is the habit — optional daily", go: ["muse"] });
     S.push({ block: "Evening", id: "invis", label: `Invisalign ${f.invGoal} h`, core: true, done: f.invHrs >= f.invGoal, detail: f.invAny ? `${Math.round(f.invHrs * 10) / 10} h so far` : "no in/out logged today", go: ["health", "invis"] });
     if (sunday) {
       S.push({ block: "Sunday", id: "week", label: "Health → Week card: planned vs done", core: false, done: visited(ds, "health"), detail: visited(ds, "health") ? "opened today" : "", go: ["health", "today"] });
       S.push({ block: "Sunday", id: "sched", label: "Set next week's study minutes", core: false, done: f.nextWeekPlanned, detail: f.nextWeekPlanned ? "next week has a plan" : "Study → Schedule grid", go: ["study", "schedule"] });
       S.push({ block: "Sunday", id: "streak", label: "One look at Streaks", core: false, done: visited(ds, "streak"), detail: "", go: ["streak"] });
     }
+    // periodic — shown always, never core; "done" = inside the window
+    const dayMs = 86400000; const nowMs = Date.now();
+    const trendsAge = f.lastTrends ? Math.floor((nowMs - f.lastTrends) / dayMs) : null;
+    S.push({ block: "Periodic", id: "trends", label: "Review trends — run the Insights analysis (every 30 days)", core: false, optional: true, done: trendsAge != null && trendsAge <= 30,
+      detail: trendsAge == null ? "never run · due" : trendsAge <= 30 ? `last ${trendsAge} d ago · next in ${30 - trendsAge} d` : `last ${trendsAge} d ago · DUE`, go: ["health", "insights"] });
+    const scanAge = f.lastScan ? Math.floor((parseDs(ds) - parseDs(f.lastScan)) / dayMs) : null;
+    S.push({ block: "Periodic", id: "scan", label: "ZOZOFIT scan + tape (monthly, first weekend)", core: false, optional: true, done: scanAge != null && scanAge <= 31,
+      detail: scanAge == null ? "no measurements logged · due" : scanAge <= 31 ? `last ${f.lastScan} · next by ${addDays(f.lastScan, 31)}` : `last ${f.lastScan} · ${scanAge - 31} d overdue`, go: ["health", "withings"] });
+    const labAge = f.lastLab ? Math.floor((parseDs(ds) - parseDs(f.lastLab)) / dayMs) : null;
+    S.push({ block: "Periodic", id: "labs", label: "Lab draw (every 90 days)", core: false, optional: true, done: labAge != null && labAge <= 90,
+      detail: labAge == null ? "no labs logged · due" : labAge <= 90 ? `last ${f.lastLab} · next by ${addDays(f.lastLab, 90)}` : `last ${f.lastLab} · ${labAge - 90} d overdue`, go: ["health", "labs"] });
     return S;
   }
 
   /* the run: consecutive days (ending today or yesterday) where every core step was met — derived, never stored */
-  function runLength(hd, ql) {
+  function runLength(hd, ql, mu) {
     const t = todayStr();
-    const coreOk = (ds) => steps(ds, facts(ds, hd, ql)).filter((s) => s.core).every((s) => s.done);
+    const coreOk = (ds) => steps(ds, facts(ds, hd, ql, mu)).filter((s) => s.core).every((s) => s.done);
     let n = 0, cur = coreOk(t) ? t : addDays(t, -1);
     if (cur < RUN_FROM || !coreOk(cur)) return 0;
     while (cur >= RUN_FROM && coreOk(cur) && n < 400) { n++; cur = addDays(cur, -1); }
@@ -13563,16 +13602,20 @@ const TodayApp = (function () {
   function Today({ active }) {
     const [hd, setHd] = useState(null);
     const [ql, setQl] = useState(null);
+    const [mu, setMu] = useState({});
+    const [signedIn, setSignedIn] = useState(true);
+    useEffect(() => { if (!sb) return; sb.auth.getSession().then(({ data }) => setSignedIn(!!(data && data.session))).catch(() => {}); const { data: sub } = sb.auth.onAuthStateChange((_e, sess) => { setSignedIn(!!sess); if (sess) load(); }); return () => { try { sub.subscription.unsubscribe(); } catch (e) {} }; }, []);
     const [err, setErr] = useState("");
     const [, tick] = useState(0);
     const load = async () => {
       if (!sb) { setErr("no database"); return; }
       try {
-        const [a, b] = await Promise.all([
+        const [a, b, c] = await Promise.all([
           sb.from("hundred_days").select("state").eq("id", "linda").maybeSingle(),
           sb.from("quick_log").select("state").eq("id", "linda").maybeSingle(),
+          sb.from("muse").select("state").eq("id", "linda").maybeSingle().then((r) => r, () => ({ data: null })),
         ]);
-        setHd((a.data && a.data.state) || {}); setQl((b.data && b.data.state) || {}); setErr("");
+        setHd((a.data && a.data.state) || {}); setQl((b.data && b.data.state) || {}); setMu((c && c.data && c.data.state) || {}); setErr("");
       } catch (e) { setErr("couldn't read — " + (e.message || e)); }
     };
     useEffect(() => { load(); }, []);
@@ -13592,18 +13635,25 @@ const TodayApp = (function () {
     };
 
     const font = "'Hanken Grotesk', sans-serif", mono = "'DM Mono', monospace", serif = "'Fraunces', serif";
+    if (!signedIn) return (
+      <div style={{ maxWidth: 480, margin: "0 auto", padding: "50px 18px", textAlign: "center", fontFamily: font, color: C.ink }}>
+        <div style={{ fontFamily: serif, fontSize: 20, marginBottom: 6 }}>Signed out</div>
+        <div style={{ fontSize: 12.5, color: C.soft, marginBottom: 16, lineHeight: 1.5 }}>Today reads your entries, so it needs the same sign-in as the rest of the app.</div>
+        <button onClick={() => { try { window.dispatchEvent(new CustomEvent("lc:goto", { detail: "time" })); } catch (e) {} }} style={{ padding: "10px 16px", border: "none", borderRadius: 9, background: C.ink, color: C.paper, fontFamily: font, fontWeight: 700, fontSize: 13, cursor: "pointer" }}>Sign in on the Time tab →</button>
+      </div>
+    );
     if (!hd || !ql) return <div style={{ maxWidth: 480, margin: "0 auto", padding: "60px 18px", textAlign: "center", fontFamily: mono, fontSize: 12, letterSpacing: 1, color: C.soft }}>{err || "reading today…"}</div>;
 
     const ds = todayStr();
-    const f = facts(ds, hd, ql);
+    const f = facts(ds, hd, ql, mu);
     const S = steps(ds, f);
     const doneAll = S.filter((s) => s.done).length;
     const leftReq = S.filter((s) => !s.done && !s.optional).length;
     const leftOpt = S.filter((s) => !s.done && s.optional).length;
     const coreLeft = S.filter((s) => s.core && !s.done);
-    const run = runLength(hd, ql);
+    const run = runLength(hd, ql, mu);
     const next = S.find((s) => !s.done && !s.optional) || S.find((s) => !s.done);
-    const ORDER = ["Morning", "Noon", "Afternoon", "Evening", "Sunday"];
+    const ORDER = ["Morning", "Noon", "Afternoon", "Evening", "Sunday", "Periodic"];
     const blocks = ORDER.filter((b) => S.some((s) => s.block === b));
     const hour = new Date().getHours();
     const nowBlock = hour < 11 ? "Morning" : hour < 14 ? "Noon" : hour < 17 ? "Afternoon" : "Evening";
@@ -13661,7 +13711,7 @@ const TodayApp = (function () {
         })}
 
         <p style={{ fontFamily: mono, fontSize: 10, color: C.faint, textAlign: "center", lineHeight: 1.6, margin: "6px 0 0" }}>
-          Ticks come from your entries, not from this screen. Core steps (weigh · fast · water goal by afternoon · night supplements · 2 h study · dinner · stop time · whole foods · Invisalign) make the run, counted from Sept 28.<br />
+          Ticks come from your entries, not from this screen. Core steps (weigh · morning reset · fast · walk · water goal · workout per plan · night supplements · 2 h study · dinner · stop time · whole foods · Invisalign) make the run, counted from Sept 28. Periodic items never count.<br />
           Sleep, steps, HRV and workouts sync themselves — never listed here.<br />TODAY · {APP_VERSION}
         </p>
       </div>
@@ -13813,7 +13863,7 @@ function Shell() {
   return (<div>
     <div style={{ maxWidth: 480, margin: "0 auto", padding: "10px 16px 0" }}>
       <div id="lc-switch" style={{ display: "flex", flexWrap: "wrap", gap: 6, background: C.paper, border: "1px solid " + C.line, borderRadius: 13, padding: 4 }}>
-        <button onClick={() => pick("today")} style={seg(mode === "today")}>☀ Today</button>
+        <button onClick={() => pick("today")} style={{ ...seg(mode === "today"), flex: "1 1 100%", fontSize: 13.5 }}>☀ Today</button>
         <button onClick={() => pick("time")} style={seg(mode === "time")}>⏱ Time</button>
         <button onClick={() => pick("study")} style={seg(mode === "study")}>📚 Study</button>
         <button onClick={() => pick("health")} style={seg(mode === "health")}>❤ Health</button>

@@ -4,6 +4,21 @@ Shell version is `APP_VERSION` near the top of `index.html` (inside QuickLogApp)
 `APP_VERSION`: Health, Muse, Streaks (ConsistencyApp), Practice. Bump the shell on every deploy; bump an app's
 version only when that app changed.
 
+## v7.61 — 2026-09-27 (Today v1.6)
+- Periodic: **ZOZOFIT scan + tape, monthly** — from the last saved measurement date; links to the Measurements card.
+- Today now shows a **Signed out** notice with a button to the Time tab's sign-in when there is no session,
+  instead of silently reading nothing.
+
+## v7.60 — 2026-09-27 (Today v1.5)
+- **Six more steps.** Morning: **Morning reset** (core — the Movement routine completed) and **Blood pressure**
+  (optional — today's Withings cuff reading). Afternoon: **Walk** (core — steps ≥ today's ramp goal, Withings or
+  entered). Evening: **Workout per plan** (core — lift day needs Resistance ticked, cardio day needs Cardio,
+  both needs both, rest day counts as followed; detail names the Strava class) and **Muse meditation** (optional).
+- **Periodic block** at the bottom, never counts toward the run: **Review trends** every 30 days (last Insights
+  analysis run) and **Lab draw** every 90 days (last lab date) — each shows last / next-by / overdue and links
+  to its screen. More can be added the same way (ZOZOFIT monthly once the scan data is in reach).
+- Today reads the `muse` row as well now. Shell: the Today tab sits on its own full-width row above the others.
+
 ## v7.59 — 2026-09-27 (Today v1.4)
 - **Water is a goal, not a tap.** Three checkpoints against your Health water goal (80 oz): ⅓ by noon, ⅔ by
   mid-afternoon (both optional prompts), and the full goal **done before evening** (core). A 2 oz glass no longer
