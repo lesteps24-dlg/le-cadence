@@ -4,6 +4,18 @@ Shell version is `APP_VERSION` near the top of `index.html` (inside QuickLogApp)
 `APP_VERSION`: Health, Muse, Streaks (ConsistencyApp), Practice. Bump the shell on every deploy; bump an app's
 version only when that app changed.
 
+## v7.67 — 2026-09-27 (Today v1.9)
+- **Last 30 days** — a collapsible card at the bottom of Today. One row per day: the day's three things with
+  ✓/○, and how many core steps were met (`11/13 core`, ✓ when all). Header shows full days and things done. Runs
+  back to Sept 28 or the earliest day you set three things, whichever is earlier.
+
+## v7.66 — 2026-09-27
+- **Fix: Three Things (and skips) failed to save after a page reload.** `today_state.updated_at` is a real
+  timestamp column; Postgres returns it as `…+00:00`, and sending that back as the concurrency filter turned the
+  `+` into a space, so Postgres rejected every save made after a reload ("Couldn't save — invalid input syntax
+  for type timestamp"). The save helper now normalises the timestamp to the `Z` form before comparing. The older
+  tables store the value as text, which is why only Today was affected.
+
 ## v7.65 — 2026-09-27 (Today v1.8 · Health v3.99)
 - **Three things today** — a card under Next on the Today tab: three lines you type, tick by hand. Stored per day
   in `today_state`, so it follows you across devices. "↧ carry n unfinished from yesterday" pulls forward what

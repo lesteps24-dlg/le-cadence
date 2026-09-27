@@ -34,6 +34,10 @@ if (typeof window !== "undefined") window.__SB = __SB;
    expected: the updated_at we last read for this row; null = we believe the row does not exist. */
 window.__lcSave = async function (sb, table, id, state, expected) {
   const updated_at = new Date().toISOString();
+  // v7.66: a timestamptz column comes back as "…+00:00"; sent back as a filter the "+" can be read as a space and
+  // Postgres rejects it ("invalid input syntax for type timestamp with time zone") — every save after a reload
+  // failed on today_state. Normalise to the "Z" form; text columns hold that form already so nothing changes there.
+  if (expected && /[+\- ]\d\d(:?\d\d)?$/.test(expected) && !isNaN(Date.parse(expected.replace(" ", "T")))) expected = new Date(expected.replace(" ", "T")).toISOString();
   const conflict = async () => {
     const { data: cur } = await sb.from(table).select("state, updated_at").eq("id", id).maybeSingle();
     const e = new Error("Changed on another device"); e.code = "LC_CONFLICT"; e.row = cur || null; return e;
@@ -85,7 +89,7 @@ const { useState, useEffect, useRef } = React;
     const SUPABASE_ANON  = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNsd2xuYnp4cmFpYXZwY2pidml5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQyMzg5NjksImV4cCI6MjA4OTgxNDk2OX0.-r80YRrZG2us0kQwFpo0IKbmYX45VsF8TFFnYPT3qsM";
     const TABLE         = "quick_log";
     const USER_KEY      = "linda";
-    const APP_VERSION   = "v7.65 · 2026-09-27";
+    const APP_VERSION   = "v7.67 · 2026-09-27";
     const TIME_ANALYZE_URL = "https://le-cadence-analyze.lesteps24.workers.dev/";
     const IDLE_GOAL_HRS = 1;   // target: no more than 1 hour of idle / TV per day
     const SESSION_TYPES = ["Study", "Class", "Quiz/Test", "Project", "Other"];
@@ -13503,7 +13507,7 @@ const PracticeApp = (function () {
 const TodayApp = (function () {
   const { useState, useEffect, useRef } = React;
   const sb = (typeof window !== "undefined" && window.__SB) ? window.__SB : null;
-  const APP_VERSION = "v1.8 · 2026-09-27";
+  const APP_VERSION = "v1.9 · 2026-09-27";
   const RUN_FROM = "2026-09-28";        // the run counts from this day — Linda's reset for Sept 28
   const STUDY_TARGET_MIN = 120;         // 2 h/day is the bar; 3 h is the stretch shown in the detail
   const STUDY_STRETCH_MIN = 180;
@@ -13692,6 +13696,7 @@ const TodayApp = (function () {
     const setThree = (ds, list) => { const cur = tstate || {}; const next = { ...cur, three: { ...(cur.three || {}), [ds]: list } }; Object.keys(next.three).sort().slice(0, -60).forEach((old) => delete next.three[old]); return saveT(next); };
     const threeDraft = useRef({});   // uncommitted text per index while typing
     const [signedIn, setSignedIn] = useState(true);
+    const [histOpen, setHistOpen] = useState(false);
     useEffect(() => { if (!sb) return; sb.auth.getSession().then(({ data }) => setSignedIn(!!(data && data.session))).catch(() => {}); const { data: sub } = sb.auth.onAuthStateChange((_e, sess) => { setSignedIn(!!sess); if (sess) load(); }); return () => { try { sub.subscription.unsubscribe(); } catch (e) {} }; }, []);
     const [err, setErr] = useState("");
     const [, tick] = useState(0);
@@ -13828,6 +13833,44 @@ const TodayApp = (function () {
           );
         })}
 
+        {/* v1.9 — last 30 days: three things + whether the core steps were all met that day */}
+        {(() => {
+          const three = (tstate && tstate.three) || {};
+          const rows = [];
+          const earliest = Object.keys(three).sort()[0] || RUN_FROM;
+          const floor = earliest < RUN_FROM ? earliest : RUN_FROM;
+          for (let i = 1; i <= 30; i++) {
+            const d = addDays(ds, -i); if (d < floor) break;
+            const list = (three[d] || []).filter((x) => x && x.t && x.t.trim());
+            const core = steps(d, facts(d, hd, ql, mu), skips[d]).filter((s) => s.core);
+            const met = core.filter((s) => s.done).length;
+            rows.push({ d, list, met, total: core.length });
+          }
+          if (!rows.length) return null;
+          const fmt = (d) => { const [y, m, dd] = d.split("-").map(Number); return DOW[dowOf(d)].slice(0, 3) + " " + m + "/" + dd; };
+          return (
+            <div style={card}>
+              <button onClick={() => setHistOpen((o) => !o)} style={{ display: "flex", width: "100%", justifyContent: "space-between", alignItems: "baseline", background: "transparent", border: "none", padding: 0, cursor: "pointer", fontFamily: font }}>
+                <span style={{ fontFamily: mono, fontSize: 10, letterSpacing: 1.2, textTransform: "uppercase", color: C.soft, fontWeight: 700 }}>Last 30 days {histOpen ? "▾" : "▸"}</span>
+                <span style={{ fontFamily: mono, fontSize: 10.5, color: C.faint }}>{rows.filter((r) => r.total && r.met === r.total).length} full day{rows.filter((r) => r.total && r.met === r.total).length === 1 ? "" : "s"} · {rows.reduce((a, r) => a + r.list.filter((x) => x.d).length, 0)} things done</span>
+              </button>
+              {histOpen && rows.map((r) => (
+                <div key={r.d} style={{ borderTop: `1px solid ${C.bg}`, padding: "8px 2px" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+                    <span style={{ fontFamily: mono, fontSize: 11, color: C.ink, fontWeight: 600 }}>{fmt(r.d)}</span>
+                    <span style={{ fontFamily: mono, fontSize: 10, color: r.total && r.met === r.total ? C.sage : r.met ? C.amber : C.faint }}>{r.total ? `${r.met}/${r.total} core${r.met === r.total ? " ✓" : ""}` : ""}</span>
+                  </div>
+                  {r.list.length ? r.list.map((x, i) => (
+                    <div key={i} style={{ display: "flex", gap: 8, alignItems: "baseline", marginTop: 3 }}>
+                      <span style={{ fontFamily: mono, fontSize: 11, color: x.d ? C.sage : C.faint, width: 12 }}>{x.d ? "✓" : "○"}</span>
+                      <span style={{ fontSize: 13, color: x.d ? C.soft : C.ink, textDecoration: x.d ? "line-through" : "none", textDecorationColor: C.faint }}>{x.t}</span>
+                    </div>
+                  )) : <div style={{ fontFamily: mono, fontSize: 10, color: C.faint, marginTop: 3 }}>no three things set</div>}
+                </div>
+              ))}
+            </div>
+          );
+        })()}
         <p style={{ fontFamily: mono, fontSize: 10, color: C.faint, textAlign: "center", lineHeight: 1.6, margin: "6px 0 0" }}>
           Ticks come from your entries, not from this screen. Core steps (weigh · morning reset · fast · walk · water goal · workout per plan · night supplements · 2 h study · dinner · stop time · whole foods · Invisalign) make the run, counted from Sept 28. Periodic items never count.<br />
           Sleep, steps, HRV and workouts sync themselves — never listed here.<br />TODAY · {APP_VERSION}
