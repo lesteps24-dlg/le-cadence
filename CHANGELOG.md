@@ -4,6 +4,24 @@ Shell version is `APP_VERSION` near the top of `index.html` (inside QuickLogApp)
 `APP_VERSION`: Health, Muse, Streaks (ConsistencyApp), Practice. Bump the shell on every deploy; bump an app's
 version only when that app changed.
 
+## v7.62 — 2026-09-27 (Today v1.7 · Health v3.98)
+- **Skip today.** Every undone step (except Periodic) has a small `skip` pill: a skipped step shows `—` and
+  "skipped today", counts as met for the run, and never draws as ✓. `↺ undo` reverses it. Skips are stored in a
+  new **`today_state`** Supabase row so they follow you across devices; until that table exists they stay in
+  the browser you tapped on (the toast says so). SQL to run once (fill in your user UUID from Authentication → Users):
+
+  ```sql
+  create table if not exists today_state (id text primary key, state jsonb not null default '{}'::jsonb, updated_at timestamptz);
+  alter table today_state enable row level security;
+  create policy "today auth" on today_state for all to authenticated
+    using (auth.uid() = 'YOUR-UUID') with check (auth.uid() = 'YOUR-UUID');
+  ```
+- **Supplements matched by name.** Noon = anything named multivitamin / vitamin D (core); night = everything else,
+  i.e. iron (core). Renaming a supplement in Health moves it between the two.
+- **Saved meals** (Health → Nutrition, above the meal card). "+ save today's breakfast / lunch / dinner" names the
+  meal you've logged; it then appears as a one-tap chip for that slot (🥗 marks whole-food). Applies food, the
+  whole-food flag and the time. ✕ removes a chip. Stored as `savedMeals` in the Health row.
+
 ## v7.61 — 2026-09-27 (Today v1.6)
 - Periodic: **ZOZOFIT scan + tape, monthly** — from the last saved measurement date; links to the Measurements card.
 - Today now shows a **Signed out** notice with a button to the Time tab's sign-in when there is no session,

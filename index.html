@@ -85,7 +85,7 @@ const { useState, useEffect, useRef } = React;
     const SUPABASE_ANON  = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNsd2xuYnp4cmFpYXZwY2pidml5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQyMzg5NjksImV4cCI6MjA4OTgxNDk2OX0.-r80YRrZG2us0kQwFpo0IKbmYX45VsF8TFFnYPT3qsM";
     const TABLE         = "quick_log";
     const USER_KEY      = "linda";
-    const APP_VERSION   = "v7.61 · 2026-09-27";
+    const APP_VERSION   = "v7.62 · 2026-09-27";
     const TIME_ANALYZE_URL = "https://le-cadence-analyze.lesteps24.workers.dev/";
     const IDLE_GOAL_HRS = 1;   // target: no more than 1 hour of idle / TV per day
     const SESSION_TYPES = ["Study", "Class", "Quiz/Test", "Project", "Other"];
@@ -5335,7 +5335,7 @@ const { useState, useEffect, useRef } = React;
     const TABLE         = "hundred_days";
     const USER_KEY      = "linda";              // any fixed label; names your single saved row
     const ANALYZE_URL   = "https://hundred-days-analyze.lesteps24.workers.dev/";                   // your trends Worker
-    const APP_VERSION   = "v3.97 · 2026-09-27";  // bump this each update so you can confirm a deploy
+    const APP_VERSION   = "v3.98 · 2026-09-27";  // bump this each update so you can confirm a deploy
     const DEMO_URL      = "https://www.instagram.com/reel/DWACMUODNN1/";  // Movement routine demo
     /* ============================================================ */
 
@@ -5719,6 +5719,7 @@ const { useState, useEffect, useRef } = React;
       if (!merged.supplementLog || typeof merged.supplementLog !== "object") merged.supplementLog = {};
       if (!merged.nutritionLog || typeof merged.nutritionLog !== "object") merged.nutritionLog = {};
       if (!Array.isArray(merged.hiddenViews)) merged.hiddenViews = [];   // v3.95: tabs hidden in Settings → Tabs
+      if (!Array.isArray(merged.savedMeals)) merged.savedMeals = [];     // v3.98: [{ id, name, slot: "b"|"l"|"d", food, whole, time }]
       if (!Array.isArray(merged.resetMoves) || merged.resetMoves.length === 0) merged.resetMoves = def.resetMoves;
       merged.resetMoves = merged.resetMoves.map((m) => ({ id: m.id, name: m.name, secs: typeof m.secs === "number" ? m.secs : 60 }));
       if (typeof merged.resetRest !== "number") merged.resetRest = def.resetRest;
@@ -7584,6 +7585,33 @@ const { useState, useEffect, useRef } = React;
                         {recent.map((d) => <option key={d} value={d}>{prettyDate(d)}{log[d].bFood ? " · " + String(log[d].bFood).slice(0, 18) : ""}</option>)}
                       </select>
                       {alreadyHasFood ? <span style={{ fontFamily: "'DM Mono', monospace", fontSize: 9.5, color: C.faint }}>copy overwrites what's here</span> : null}
+                    </div>
+                  );
+                })()}
+                {/* v3.98 — saved meals: name a meal once, apply it with one tap. Same idea as the water quick-add buttons. */}
+                {(() => {
+                  const SLOTS = [["b", "Breakfast", "bFood", "bWhole", "breakfast"], ["l", "Lunch", "lFood", "lWhole", "lunch"], ["d", "Dinner", "dFood", "dWhole", "dinner"]];
+                  const meals = state.savedMeals || [];
+                  const apply = (m) => { const sl = SLOTS.find((x) => x[0] === m.slot); if (!sl) return; const patch = { [sl[2]]: m.food || "", [sl[3]]: !!m.whole }; if (m.time) patch[sl[4]] = m.time; set(patch); window.__lcToast(`${m.name} → ${sl[1].toLowerCase()}`); };
+                  const saveCurrent = (slot) => { const sl = SLOTS.find((x) => x[0] === slot); const food = rec[sl[2]]; if (!food) { window.__lcToast(`Log ${sl[1].toLowerCase()} first, then save it`); return; } const name = prompt(`Name this ${sl[1].toLowerCase()}:`, String(food).slice(0, 24)); if (!name) return; setState((st) => ({ ...st, savedMeals: [...(st.savedMeals || []), { id: "m" + Date.now().toString(36), name: name.trim(), slot, food: String(food), whole: !!rec[sl[3]], time: rec[sl[4]] || "" }] })); };
+                  const remove = (id) => { if (!confirm("Remove this saved meal?")) return; setState((st) => ({ ...st, savedMeals: (st.savedMeals || []).filter((m) => m.id !== id) })); };
+                  return (
+                    <div style={{ ...card, marginBottom: 12 }}>
+                      <p style={miniLabel}>SAVED MEALS</p>
+                      {meals.length ? SLOTS.map(([slot, lbl]) => { const ms = meals.filter((m) => m.slot === slot); return ms.length ? (
+                        <div key={slot} style={{ display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center", marginBottom: 6 }}>
+                          <span style={{ fontFamily: "'DM Mono', monospace", fontSize: 9.5, color: C.faint, width: 62, flexShrink: 0 }}>{lbl.toUpperCase()}</span>
+                          {ms.map((m) => (
+                            <span key={m.id} style={{ display: "inline-flex", alignItems: "center", border: `1px solid ${C.line}`, borderRadius: 999, overflow: "hidden" }}>
+                              <button onClick={() => apply(m)} title={m.food} style={{ ...ghostMini, padding: "6px 10px", border: "none", fontSize: 12 }}>{m.whole ? "🥗 " : ""}{m.name}</button>
+                              <button onClick={() => remove(m.id)} title="remove" style={{ ...ghostMini, padding: "6px 8px", border: "none", borderLeft: `1px solid ${C.line}`, color: C.faint, fontSize: 11 }}>✕</button>
+                            </span>
+                          ))}
+                        </div>
+                      ) : null; }) : <p style={{ fontFamily: "'Hanken Grotesk', sans-serif", fontSize: 12, color: C.soft, margin: "0 0 8px", lineHeight: 1.45 }}>Log a meal below, then save it here. Next time it's one tap.</p>}
+                      <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 4 }}>
+                        {SLOTS.map(([slot, lbl, fk]) => <button key={slot} onClick={() => saveCurrent(slot)} disabled={!rec[fk]} style={{ ...ghostMini, padding: "6px 10px", opacity: rec[fk] ? 1 : 0.45 }}>+ save today's {lbl.toLowerCase()}</button>)}
+                      </div>
                     </div>
                   );
                 })()}
@@ -13452,7 +13480,7 @@ const PracticeApp = (function () {
 const TodayApp = (function () {
   const { useState, useEffect, useRef } = React;
   const sb = (typeof window !== "undefined" && window.__SB) ? window.__SB : null;
-  const APP_VERSION = "v1.6 · 2026-09-27";
+  const APP_VERSION = "v1.7 · 2026-09-27";
   const RUN_FROM = "2026-09-28";        // the run counts from this day — Linda's reset for Sept 28
   const STUDY_TARGET_MIN = 120;         // 2 h/day is the bar; 3 h is the stretch shown in the detail
   const STUDY_STRETCH_MIN = 180;
@@ -13509,6 +13537,11 @@ const TodayApp = (function () {
     // supplements: all listed taken
     const supps = hd.supplements || []; const sl = (hd.supplementLog || {})[ds] || {};
     const suppN = supps.filter((x) => sl[x.id]).length;
+    // v1.7 — noon = multivitamin + vitamin D, night = everything else (iron). Matched by name, so renaming a supplement moves it.
+    const NOON_RE = /multi|vitamin\s*d\b|\bd3\b/i;
+    const noonSet = supps.filter((x) => NOON_RE.test(x.name || "")), nightSet = supps.filter((x) => !NOON_RE.test(x.name || ""));
+    const noonN = noonSet.filter((x) => sl[x.id]).length, nightN = nightSet.filter((x) => sl[x.id]).length;
+    const names = (arr) => arr.map((x) => x.name).join(" + ");
     // v1.5 — morning routine, blood pressure, steps vs ramp goal, workout per plan, Muse
     const morningDone = !!((hd.morningLog || {})[ds]);
     const bp = w && w.systolic != null && w.diastolic != null ? `${w.systolic}/${w.diastolic}` : null;
@@ -13529,13 +13562,14 @@ const TodayApp = (function () {
     const wU = (hd.weightUnit || "lb") === "kg" ? "kg" : "lb";
     const wVal = !w ? null : wU === "kg" ? (w.weightKg != null ? w.weightKg : (w.weightLb != null ? Math.round(w.weightLb / 2.20462 * 10) / 10 : null)) : (w.weightLb != null ? w.weightLb : (w.weightKg != null ? Math.round(w.weightKg * 2.20462 * 10) / 10 : null));
     return { morningDone, bp, stepsGoal, stepsN, stepsOv: stepsOv != null, liftDone, cardioDone, stravaNames, museToday, lastTrends, lastLab, lastScan,
-      wholeDone, wholeAll, wholeN, sugar: !!nut.sugar, fastDone, fastMin, fastGoal, invHrs, invGoal, invAny: !!inv, suppN, suppTotal: supps.length, waterGoal, weight: wVal, steps: w && w.steps != null ? w.steps : null, waterOz, waterN: water.length,
+      wholeDone, wholeAll, wholeN, sugar: !!nut.sugar, fastDone, fastMin, fastGoal, invHrs, invGoal, invAny: !!inv, suppN, suppTotal: supps.length, noonN, noonTotal: noonSet.length, nightN, nightTotal: nightSet.length, noonNames: names(noonSet), nightNames: names(nightSet), waterGoal, weight: wVal, steps: w && w.steps != null ? w.steps : null, waterOz, waterN: water.length,
       lunch: !!(nut.lunch || nut.lFood), lunchTxt: nut.lFood || nut.lunch || "", dinner: !!(nut.dinner || nut.dFood), dinnerTxt: nut.dFood || nut.dinner || "",
       stopped: nut.stoppedTonight || "", studyMin, subjects, errs, qsets: qsets.length, drilled, plan, nextWeekPlanned, weightUnit: wU };
   }
 
   /* ---- the routine, as steps. `core` steps make up the daily run. ---- */
-  function steps(ds, f) {
+  function steps(ds, f, skipped) {
+    const sk = skipped || [];
     const sunday = dowOf(ds) === 0;
     const planTxt = f.plan === "rest" ? "Rest day" : f.plan === "both" ? "Lift + cardio" : f.plan === "lift" ? "Lift" : "Cardio";
     const S = [];
@@ -13553,8 +13587,8 @@ const TodayApp = (function () {
     S.push({ block: "Noon", id: "lunch", label: "Log lunch (Same as yesterday if it repeats)", core: false, optional: true, done: f.lunch, detail: f.lunch ? f.lunchTxt.slice(0, 40) : "optional", go: ["health", "nutrition"] });
     S.push({ block: "Morning", id: "fast", label: `Fast ${Math.round(f.fastGoal / 60)} h (from last night's stop time)`, core: true, done: f.fastDone, detail: f.fastMin != null ? `${Math.floor(f.fastMin / 60)}h ${f.fastMin % 60}m${f.fastDone ? "" : " · set 'started eating' when you break it"}` : "needs last night's stop time + today's start time", go: ["health", "nutrition"] });
     // supplements: noon dose = at least one ticked; night dose = all ticked (the log is per-supplement, not per-time)
-    S.push({ block: "Noon", id: "supps1", label: "Supplements — noon dose", core: false, optional: true, done: f.suppN > 0, detail: f.suppTotal ? `${f.suppN} of ${f.suppTotal} ticked` : "none listed in Health → Supplements", go: ["health", "supp"] });
-    S.push({ block: "Evening", id: "supps2", label: "Supplements — night dose (all ticked)", core: true, done: f.suppTotal > 0 && f.suppN >= f.suppTotal, detail: f.suppTotal ? `${f.suppN} of ${f.suppTotal}` : "none listed in Health → Supplements", go: ["health", "supp"] });
+    S.push({ block: "Noon", id: "supps1", label: `Supplements — noon: ${f.noonNames || "multivitamin + vitamin D"}`, core: true, done: f.noonTotal > 0 && f.noonN >= f.noonTotal, detail: f.noonTotal ? `${f.noonN} of ${f.noonTotal} ticked` : "no multivitamin / vitamin D in your supplement list", go: ["health", "supp"] });
+    S.push({ block: "Evening", id: "supps2", label: `Supplements — night: ${f.nightNames || "iron"}`, core: true, done: f.nightTotal > 0 && f.nightN >= f.nightTotal, detail: f.nightTotal ? `${f.nightN} of ${f.nightTotal} ticked` : "nothing left for night in your list", go: ["health", "supp"] });
     // workout per the weekday plan: lift → Resistance ticked, cardio → Cardio ticked, both → both, rest → plan followed
     const needLift = f.plan === "lift" || f.plan === "both", needCardio = f.plan === "cardio" || f.plan === "both";
     const woDone = f.plan === "rest" ? true : (!needLift || f.liftDone) && (!needCardio || f.cardioDone);
@@ -13586,13 +13620,16 @@ const TodayApp = (function () {
     const labAge = f.lastLab ? Math.floor((parseDs(ds) - parseDs(f.lastLab)) / dayMs) : null;
     S.push({ block: "Periodic", id: "labs", label: "Lab draw (every 90 days)", core: false, optional: true, done: labAge != null && labAge <= 90,
       detail: labAge == null ? "no labs logged · due" : labAge <= 90 ? `last ${f.lastLab} · next by ${addDays(f.lastLab, 90)}` : `last ${f.lastLab} · ${labAge - 90} d overdue`, go: ["health", "labs"] });
+    // a skipped step reads as done for the run but is drawn as skipped, never as ✓
+    S.forEach((st) => { if (sk.includes(st.id) && !st.done) { st.skipped = true; st.done = true; st.detail = "skipped today"; } });
     return S;
   }
 
   /* the run: consecutive days (ending today or yesterday) where every core step was met — derived, never stored */
-  function runLength(hd, ql, mu) {
+  const TODAY_TABLE = "today_state";   // own row; skips live here (SQL in CHANGELOG v7.62). Falls back to this browser if the table is missing.
+  function runLength(hd, ql, mu, skips) {
     const t = todayStr();
-    const coreOk = (ds) => steps(ds, facts(ds, hd, ql, mu)).filter((s) => s.core).every((s) => s.done);
+    const coreOk = (ds) => steps(ds, facts(ds, hd, ql, mu), (skips || {})[ds]).filter((s) => s.core).every((s) => s.done);
     let n = 0, cur = coreOk(t) ? t : addDays(t, -1);
     if (cur < RUN_FROM || !coreOk(cur)) return 0;
     while (cur >= RUN_FROM && coreOk(cur) && n < 400) { n++; cur = addDays(cur, -1); }
@@ -13603,6 +13640,27 @@ const TodayApp = (function () {
     const [hd, setHd] = useState(null);
     const [ql, setQl] = useState(null);
     const [mu, setMu] = useState({});
+    const [tstate, setTstate] = useState(null);      // { skips: { [date]: [stepId] } } from today_state, or local fallback
+    const tSeen = useRef(undefined); const tLocal = useRef(false);
+    const readLocalT = () => { try { return JSON.parse(window.localStorage.getItem("lc_today_state") || "{}"); } catch (e) { return {}; } };
+    const loadT = async () => {
+      if (!sb) { setTstate(readLocalT()); tLocal.current = true; return; }
+      try {
+        const { data, error } = await sb.from(TODAY_TABLE).select("state, updated_at").eq("id", "linda").maybeSingle();
+        if (error) throw error;
+        tSeen.current = data ? (data.updated_at || "") : null; tLocal.current = false; setTstate((data && data.state) || {});
+      } catch (e) { tLocal.current = true; setTstate(readLocalT()); }   // table missing → this browser only
+    };
+    const toggleSkip = async (ds, id) => {
+      const cur = tstate || {}; const day = (cur.skips || {})[ds] || [];
+      const nextDay = day.includes(id) ? day.filter((x) => x !== id) : [...day, id];
+      const next = { ...cur, skips: { ...(cur.skips || {}), [ds]: nextDay } };
+      Object.keys(next.skips).sort().slice(0, -60).forEach((old) => delete next.skips[old]);
+      setTstate(next);
+      if (tLocal.current || !sb) { try { window.localStorage.setItem("lc_today_state", JSON.stringify(next)); } catch (e) {} window.__lcToast(day.includes(id) ? "Un-skipped (this device only — today_state table not set up)" : "Skipped today (this device only — today_state table not set up)"); return; }
+      try { tSeen.current = await window.__lcSave(sb, TODAY_TABLE, "linda", next, tSeen.current); }
+      catch (e) { if (e && e.code === "LC_CONFLICT" && e.row) { tSeen.current = e.row.updated_at || ""; setTstate(e.row.state || {}); window.__lcToast("Today: updated on another device — reloaded"); } else { window.__lcToast("Couldn't save the skip — " + (e.message || e)); } }
+    };
     const [signedIn, setSignedIn] = useState(true);
     useEffect(() => { if (!sb) return; sb.auth.getSession().then(({ data }) => setSignedIn(!!(data && data.session))).catch(() => {}); const { data: sub } = sb.auth.onAuthStateChange((_e, sess) => { setSignedIn(!!sess); if (sess) load(); }); return () => { try { sub.subscription.unsubscribe(); } catch (e) {} }; }, []);
     const [err, setErr] = useState("");
@@ -13618,8 +13676,8 @@ const TodayApp = (function () {
         setHd((a.data && a.data.state) || {}); setQl((b.data && b.data.state) || {}); setMu((c && c.data && c.data.state) || {}); setErr("");
       } catch (e) { setErr("couldn't read — " + (e.message || e)); }
     };
-    useEffect(() => { load(); }, []);
-    useEffect(() => { if (active) load(); }, [active]);
+    useEffect(() => { load(); loadT(); }, []);
+    useEffect(() => { if (active) { load(); loadT(); } }, [active]);
     useEffect(() => {
       const h = () => setTimeout(load, 900);   // let the other app's debounced save land first
       const vis = () => { if (document.visibilityState === "visible" && active) load(); };
@@ -13645,13 +13703,14 @@ const TodayApp = (function () {
     if (!hd || !ql) return <div style={{ maxWidth: 480, margin: "0 auto", padding: "60px 18px", textAlign: "center", fontFamily: mono, fontSize: 12, letterSpacing: 1, color: C.soft }}>{err || "reading today…"}</div>;
 
     const ds = todayStr();
+    const skips = (tstate && tstate.skips) || {};
     const f = facts(ds, hd, ql, mu);
-    const S = steps(ds, f);
+    const S = steps(ds, f, skips[ds]);
     const doneAll = S.filter((s) => s.done).length;
     const leftReq = S.filter((s) => !s.done && !s.optional).length;
     const leftOpt = S.filter((s) => !s.done && s.optional).length;
     const coreLeft = S.filter((s) => s.core && !s.done);
-    const run = runLength(hd, ql, mu);
+    const run = runLength(hd, ql, mu, skips);
     const next = S.find((s) => !s.done && !s.optional) || S.find((s) => !s.done);
     const ORDER = ["Morning", "Noon", "Afternoon", "Evening", "Sunday", "Periodic"];
     const blocks = ORDER.filter((b) => S.some((s) => s.block === b));
@@ -13698,13 +13757,18 @@ const TodayApp = (function () {
                 <span style={{ fontFamily: mono, fontSize: 10.5, color: dn === items.length ? C.sage : C.faint }}>{dn}/{items.length}</span>
               </div>
               {items.map((s) => (
-                <button key={s.id} onClick={() => go(s.go)} style={{ display: "flex", alignItems: "flex-start", gap: 10, width: "100%", textAlign: "left", background: "transparent", border: "none", borderTop: `1px solid ${C.bg}`, padding: "9px 2px", cursor: "pointer", fontFamily: font }}>
-                  <span style={{ width: 22, height: 22, borderRadius: 7, flexShrink: 0, marginTop: 1, border: `1.5px solid ${s.done ? C.sage : s.optional ? C.faint : C.line}`, background: s.done ? C.sage : "transparent", color: C.paper, fontSize: 13, display: "flex", alignItems: "center", justifyContent: "center" }}>{s.done ? "✓" : ""}</span>
-                  <span style={{ flex: 1, minWidth: 0 }}>
-                    <span style={{ display: "block", fontSize: 14.5, fontWeight: 600, color: s.done ? C.soft : C.ink, textDecoration: s.done ? "line-through" : "none", textDecorationColor: C.faint }}>{s.label}{s.optional && !s.done ? <span style={{ fontFamily: mono, fontSize: 9.5, color: C.faint, marginLeft: 6 }}>optional</span> : null}</span>
-                    {s.detail ? <span style={{ display: "block", fontFamily: mono, fontSize: 10, color: s.done ? C.sage : C.soft, marginTop: 2 }}>{s.detail}</span> : null}
-                  </span>
-                </button>
+                <div key={s.id} style={{ display: "flex", alignItems: "flex-start", gap: 10, width: "100%", borderTop: `1px solid ${C.bg}`, padding: "9px 2px", fontFamily: font, opacity: s.skipped ? 0.55 : 1 }}>
+                  <button onClick={() => go(s.go)} style={{ display: "flex", alignItems: "flex-start", gap: 10, flex: 1, minWidth: 0, textAlign: "left", background: "transparent", border: "none", padding: 0, cursor: "pointer", fontFamily: font }}>
+                    <span style={{ width: 22, height: 22, borderRadius: 7, flexShrink: 0, marginTop: 1, border: `1.5px solid ${s.skipped ? C.faint : s.done ? C.sage : s.optional ? C.faint : C.line}`, background: s.skipped ? "transparent" : s.done ? C.sage : "transparent", color: s.skipped ? C.soft : C.paper, fontSize: 13, display: "flex", alignItems: "center", justifyContent: "center" }}>{s.skipped ? "—" : s.done ? "✓" : ""}</span>
+                    <span style={{ flex: 1, minWidth: 0 }}>
+                      <span style={{ display: "block", fontSize: 14.5, fontWeight: 600, color: s.done ? C.soft : C.ink, textDecoration: s.done && !s.skipped ? "line-through" : "none", textDecorationColor: C.faint }}>{s.label}{s.optional && !s.done ? <span style={{ fontFamily: mono, fontSize: 9.5, color: C.faint, marginLeft: 6 }}>optional</span> : null}</span>
+                      {s.detail ? <span style={{ display: "block", fontFamily: mono, fontSize: 10, color: s.skipped ? C.soft : s.done ? C.sage : C.soft, marginTop: 2 }}>{s.detail}</span> : null}
+                    </span>
+                  </button>
+                  {(!s.done || s.skipped) && b !== "Periodic" ? (
+                    <button onClick={(e) => { e.stopPropagation(); toggleSkip(ds, s.id); }} title={s.skipped ? "Un-skip" : "Doesn't apply today — skip without breaking the run"} style={{ flexShrink: 0, alignSelf: "center", background: "transparent", border: `1px solid ${C.line}`, borderRadius: 999, color: C.soft, fontFamily: mono, fontSize: 9.5, padding: "3px 8px", cursor: "pointer" }}>{s.skipped ? "↺ undo" : "skip"}</button>
+                  ) : null}
+                </div>
               ))}
             </div>
           );
