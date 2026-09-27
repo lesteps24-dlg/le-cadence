@@ -4,6 +4,19 @@ Shell version is `APP_VERSION` near the top of `index.html` (inside QuickLogApp)
 `APP_VERSION`: Health, Muse, Streaks (ConsistencyApp), Practice. Bump the shell on every deploy; bump an app's
 version only when that app changed.
 
+## v7.64 — 2026-09-27 (Muse v1.16)
+- **Oura is now the primary sleep source, end to end.** The `oura-sync` Worker already returned the full ring
+  dataset (stages, efficiency, latency, HRV, lowest/average HR, breathing rate, sleep score, readiness,
+  temperature deviation, SpO2, breathing disturbance, daytime stress/recovery, resilience, workouts, activity);
+  the app was only reading five fields. Now:
+  - **Time tab:** the automatic sleep block is placed at Oura's real bedtime and wake time (`bedStart` /
+    `bedEnd`, new in `workers/oura-sync.js` — paste that file into the Cloudflare Worker and Deploy). Nights
+    without Oura still estimate back from the wake anchor. A manual block for a night still overrides.
+  - **Muse:** the session's recovery context sends the whole Oura set to the analyzer, and the sleep breathing
+    rate auto-fills from Oura first, Withings mat as fallback.
+- Worker sources now live in `workers/` (renamed from `.js.txt`). `oura-proxy.js` is the Family Greene
+  pass-through, not used by Cadence; `whoop-sync.js` was re-copied. No secrets in any of them.
+
 ## v7.63 — 2026-09-27
 - **Fix: a typed sleep block could vanish.** The Time tab's automatic sleep fill rewrote identical auto blocks on
   every Health sync, which saved the row each time; on a second device that phantom save could beat a manual

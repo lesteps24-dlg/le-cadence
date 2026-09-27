@@ -85,7 +85,7 @@ const { useState, useEffect, useRef } = React;
     const SUPABASE_ANON  = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNsd2xuYnp4cmFpYXZwY2pidml5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQyMzg5NjksImV4cCI6MjA4OTgxNDk2OX0.-r80YRrZG2us0kQwFpo0IKbmYX45VsF8TFFnYPT3qsM";
     const TABLE         = "quick_log";
     const USER_KEY      = "linda";
-    const APP_VERSION   = "v7.63 · 2026-09-27";
+    const APP_VERSION   = "v7.64 · 2026-09-27";
     const TIME_ANALYZE_URL = "https://le-cadence-analyze.lesteps24.workers.dev/";
     const IDLE_GOAL_HRS = 1;   // target: no more than 1 hour of idle / TV per day
     const SESSION_TYPES = ["Study", "Class", "Quiz/Test", "Project", "Other"];
@@ -1117,9 +1117,11 @@ const { useState, useEffect, useRef } = React;
         const additions = {};
         recent.forEach((d) => {
           if (hasManualSleep(d.day)) { out.skipped++; return; } // skip only if THIS night already has a manual sleep block
-          const wake = atTime(d.day, SLEEP_WAKE);
-          if (wake == null) return;
-          const start = wake - d.sleepHours * 3600000;
+          // v7.64: Oura reports the real bedtime and wake time — use them when present; otherwise estimate back from the wake anchor
+          let wake = null, start = null;
+          const bs = d.bedStart ? new Date(d.bedStart).getTime() : NaN, be = d.bedEnd ? new Date(d.bedEnd).getTime() : NaN;
+          if (isFinite(bs) && isFinite(be) && be > bs) { start = bs; wake = be; }
+          else { wake = atTime(d.day, SLEEP_WAKE); if (wake == null) return; start = wake - d.sleepHours * 3600000; }
           const mid = parse(d.day).getTime();
           const add = (ds, st2, en) => { if (en <= st2) return; (additions[ds] = additions[ds] || []).push({ cat: sleepCat.id, start: st2, end: en, manual: true, auto: "withings", night: d.day, task: null, note: "Sleep · " + (d.src || "Withings") }); };
           if (start < mid) { add(prevDate(d.day), start, mid); add(d.day, mid, wake); }
@@ -1156,7 +1158,7 @@ const { useState, useEffect, useRef } = React;
           const wDays = (st && st.withings && st.withings.days) || [];
           const byDay = {};
           wDays.forEach((d) => { if (d && d.day && d.sleepHours != null && d.sleepHours > 0) byDay[d.day] = { day: d.day, sleepHours: d.sleepHours, src: "Withings" }; });
-          oDays.forEach((d) => { if (d && d.day && d.sleepHours != null && d.sleepHours > 0) byDay[d.day] = { day: d.day, sleepHours: d.sleepHours, src: "Oura" }; }); // v7.63: Oura wins when both exist (Linda's call, Sept 27)
+          oDays.forEach((d) => { if (d && d.day && d.sleepHours != null && d.sleepHours > 0) byDay[d.day] = { day: d.day, sleepHours: d.sleepHours, src: "Oura", bedStart: d.bedStart || null, bedEnd: d.bedEnd || null }; }); // v7.63: Oura wins when both exist (Linda's call, Sept 27)
           const merged = Object.values(byDay);
           const res = merged.length ? syncSleepFromWithings(merged) : { found: 0, added: 0, skipped: 0, noCat: false };
           const latest = merged.map((d) => d.day).sort().slice(-1)[0] || null;
@@ -10323,7 +10325,7 @@ const { useState, useEffect, useMemo, useRef } = React;
   const ANALYZE_URL   = "https://muse-analyze.lesteps24.workers.dev/";
   // Vision extractor that reads the 5 EEG band values off a chart screenshot. Deploy muse-bands, paste URL.
   const MUSE_BANDS_URL = "";   // e.g. "https://muse-bands.lesteps24.workers.dev/"
-  const APP_VERSION   = "v1.15 · 2026-09-19";
+  const APP_VERSION   = "v1.16 · 2026-09-27";
 
   /* ---------- palette (matches Le Cadence) ---------- */
   const C = {
@@ -11303,6 +11305,10 @@ const { useState, useEffect, useMemo, useRef } = React;
           updates.hrv = String(ouraDay.day.hrv);
           newSrc.hrv = { lag: ouraDay.lag, source: "oura" };
         }
+        if (ouraDay.day.breath != null && !manualOverrides.sleepBreathRate) {
+          updates.sleepBreathRate = String(ouraDay.day.breath);
+          newSrc.breathRate = ouraDay.lag;
+        }
       }
       if (withingsDay) {
         if (withingsDay.day.sleepScore != null && !manualOverrides.withingsSleep) {
@@ -11314,8 +11320,8 @@ const { useState, useEffect, useMemo, useRef } = React;
           updates.hrv = String(withingsDay.day.hrv);
           newSrc.hrv = { lag: withingsDay.lag, source: "withings_mat" };
         }
-        // Sleep breath rate — Withings only (Oura doesn't expose this in their API)
-        if (withingsDay.day.breathRate != null && !manualOverrides.sleepBreathRate) {
+        // Sleep breath rate — Oura (average_breath, v7.64) first, Withings mat as fallback
+        if (withingsDay.day.breathRate != null && updates.sleepBreathRate == null && !manualOverrides.sleepBreathRate) {
           updates.sleepBreathRate = String(withingsDay.day.breathRate);
           newSrc.breathRate = withingsDay.lag;
         }
@@ -11371,9 +11377,15 @@ const { useState, useEffect, useMemo, useRef } = React;
         // Rich recovery context — auto-attached from sync, never typed by user
         recoveryContext: {
           oura: od ? {
-            sleepHours: od.sleepHours ?? null,
-            hrv: od.hrv ?? null,
-            rhr: od.rhr ?? null,
+            // v7.64: everything the oura-sync Worker returns, so the analysis leans on the ring first
+            sleepHours: od.sleepHours ?? null, timeInBed: od.timeInBed ?? null,
+            deepMin: od.deepMin ?? null, remMin: od.remMin ?? null, lightMin: od.lightMin ?? null, awakeMin: od.awakeMin ?? null,
+            efficiency: od.efficiency ?? null, latencyMin: od.latencyMin ?? null,
+            hrv: od.hrv ?? null, rhr: od.rhr ?? null, avgHr: od.avgHr ?? null, breathRate: od.breath ?? null,
+            sleepScore: od.sleepScore ?? null, readiness: od.readiness ?? null, tempDev: od.tempDev ?? null,
+            spo2: od.spo2 ?? null, bdi: od.bdi ?? null,
+            stressMin: od.stressMin ?? null, recoveryMin: od.recoveryMin ?? null, stressSummary: od.stressSummary ?? null, resilience: od.resilience ?? null,
+            bedStart: od.bedStart ?? null, bedEnd: od.bedEnd ?? null,
             available: true,
           } : { available: false },
           withings: wd ? {
