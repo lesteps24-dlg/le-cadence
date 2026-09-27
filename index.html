@@ -89,7 +89,7 @@ const { useState, useEffect, useRef } = React;
     const SUPABASE_ANON  = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNsd2xuYnp4cmFpYXZwY2pidml5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQyMzg5NjksImV4cCI6MjA4OTgxNDk2OX0.-r80YRrZG2us0kQwFpo0IKbmYX45VsF8TFFnYPT3qsM";
     const TABLE         = "quick_log";
     const USER_KEY      = "linda";
-    const APP_VERSION   = "v7.67 · 2026-09-27";
+    const APP_VERSION   = "v7.69 · 2026-09-27";
     const TIME_ANALYZE_URL = "https://le-cadence-analyze.lesteps24.workers.dev/";
     const IDLE_GOAL_HRS = 1;   // target: no more than 1 hour of idle / TV per day
     const SESSION_TYPES = ["Study", "Class", "Quiz/Test", "Project", "Other"];
@@ -13507,7 +13507,7 @@ const PracticeApp = (function () {
 const TodayApp = (function () {
   const { useState, useEffect, useRef } = React;
   const sb = (typeof window !== "undefined" && window.__SB) ? window.__SB : null;
-  const APP_VERSION = "v1.9 · 2026-09-27";
+  const APP_VERSION = "v1.11 · 2026-09-27";
   const RUN_FROM = "2026-09-28";        // the run counts from this day — Linda's reset for Sept 28
   const STUDY_TARGET_MIN = 120;         // 2 h/day is the bar; 3 h is the stretch shown in the detail
   const STUDY_STRETCH_MIN = 180;
@@ -13692,7 +13692,9 @@ const TodayApp = (function () {
       return saveT(next, day.includes(id) ? "Un-skipped" : "Skipped today");
     };
     /* v1.8 — Three things: the day's three priorities, typed by hand, ticked by hand. Stored per day in today_state.three. */
-    const threeFor = (ds) => { const t = ((tstate || {}).three || {})[ds]; const base = [0, 1, 2].map((i) => (t && t[i]) || { t: "", d: false }); return base; };
+    // v1.10 — three slots by default; when every filled slot is done, a bonus slot appears (up to 5). Never more than five.
+    const THREE_MAX = 10;   // three by default; bonus lines appear one at a time once everything filled is done, up to this
+    const threeFor = (ds) => { const t = ((tstate || {}).three || {})[ds] || []; const n = Math.max(3, Math.min(THREE_MAX, t.length)); return Array.from({ length: n }, (_, i) => t[i] || { t: "", d: false }); };
     const setThree = (ds, list) => { const cur = tstate || {}; const next = { ...cur, three: { ...(cur.three || {}), [ds]: list } }; Object.keys(next.three).sort().slice(0, -60).forEach((old) => delete next.three[old]); return saveT(next); };
     const threeDraft = useRef({});   // uncommitted text per index while typing
     const [signedIn, setSignedIn] = useState(true);
@@ -13782,7 +13784,11 @@ const TodayApp = (function () {
         )}
 
         {(() => {
-          const three = threeFor(ds); const doneN = three.filter((x) => x.d).length; const filled = three.filter((x) => x.t.trim()).length;
+          const three0 = threeFor(ds);
+          const filled0 = three0.filter((x) => x.t.trim()).length;
+          // bonus: all filled slots done and room left → offer one more empty line
+          const three = (filled0 >= 3 && three0.length < THREE_MAX && three0.filter((x) => x.t.trim()).every((x) => x.d)) ? [...three0, { t: "", d: false }] : three0;
+          const doneN = three.filter((x) => x.d).length; const filled = three.filter((x) => x.t.trim()).length;
           const yList = threeFor(addDays(ds, -1)).filter((x) => x.t.trim() && !x.d);
           const carry = () => { const cur = three.slice(); let k = 0; yList.forEach((y) => { while (k < 3 && cur[k].t.trim()) k++; if (k < 3) { cur[k] = { t: y.t, d: false }; k++; } }); setThree(ds, cur); };
           return (
@@ -13794,7 +13800,7 @@ const TodayApp = (function () {
               {three.map((x, i) => (
                 <div key={i} style={{ display: "flex", alignItems: "center", gap: 10, borderTop: `1px solid ${C.bg}`, padding: "7px 2px" }}>
                   <button onClick={() => { if (!x.t.trim()) return; const cur = three.slice(); cur[i] = { ...x, d: !x.d }; setThree(ds, cur); }} style={{ width: 22, height: 22, borderRadius: 7, flexShrink: 0, border: `1.5px solid ${x.d ? C.sage : C.line}`, background: x.d ? C.sage : "transparent", color: C.paper, fontSize: 13, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>{x.d ? "✓" : ""}</button>
-                  <input defaultValue={x.t} key={ds + "-" + i + "-" + x.t} placeholder={["The one thing that must happen", "Second", "Third"][i]}
+                  <input defaultValue={x.t} key={ds + "-" + i + "-" + x.t} placeholder={["The one thing that must happen", "Second", "Third", "Bonus — only because the three are done"][i] || "One more"}
                     onChange={(e) => { threeDraft.current[i] = e.target.value; }}
                     onBlur={(e) => { const v = e.target.value; if (v === x.t) return; const cur = three.slice(); cur[i] = { t: v, d: v.trim() ? x.d : false }; setThree(ds, cur); }}
                     onKeyDown={(e) => { if (e.key === "Enter") e.target.blur(); }}

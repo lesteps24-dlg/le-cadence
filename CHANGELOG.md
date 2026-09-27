@@ -4,6 +4,14 @@ Shell version is `APP_VERSION` near the top of `index.html` (inside QuickLogApp)
 `APP_VERSION`: Health, Muse, Streaks (ConsistencyApp), Practice. Bump the shell on every deploy; bump an app's
 version only when that app changed.
 
+## v7.69 — 2026-09-27 (Today v1.11)
+- Three things: ceiling raised from five to **ten** (`THREE_MAX`). Same rule — a new line only appears once everything filled is ticked.
+
+## v7.68 — 2026-09-27 (Today v1.10)
+- **Three things → up to five, earned.** Three slots as before. When every filled slot is ticked, a fourth line
+  appears ("Bonus — only because the three are done"); tick that and a fifth appears. Never more than five, and
+  never before the three are done. Items stay editable after entry (tap the text, change it, Enter).
+
 ## v7.67 — 2026-09-27 (Today v1.9)
 - **Last 30 days** — a collapsible card at the bottom of Today. One row per day: the day's three things with
   ✓/○, and how many core steps were met (`11/13 core`, ✓ when all). Header shows full days and things done. Runs
