@@ -85,7 +85,7 @@ const { useState, useEffect, useRef } = React;
     const SUPABASE_ANON  = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNsd2xuYnp4cmFpYXZwY2pidml5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQyMzg5NjksImV4cCI6MjA4OTgxNDk2OX0.-r80YRrZG2us0kQwFpo0IKbmYX45VsF8TFFnYPT3qsM";
     const TABLE         = "quick_log";
     const USER_KEY      = "linda";
-    const APP_VERSION   = "v7.62 · 2026-09-27";
+    const APP_VERSION   = "v7.63 · 2026-09-27";
     const TIME_ANALYZE_URL = "https://le-cadence-analyze.lesteps24.workers.dev/";
     const IDLE_GOAL_HRS = 1;   // target: no more than 1 hour of idle / TV per day
     const SESSION_TYPES = ["Study", "Class", "Quiz/Test", "Project", "Other"];
@@ -1134,6 +1134,12 @@ const { useState, useEffect, useRef } = React;
           const adds = additions[ds] || [];
           if (!had && !adds.length) return;
           const kept = existing.filter((ss) => ss.auto !== "withings");
+          // v7.63: only rewrite the day if the auto block actually differs. Rewriting identical blocks on every sync
+          // saved the row every time, and on a second device that save could beat a manual entry (the "updated on
+          // another device — reloaded" toast) — which is how a typed sleep block went missing on Sept 27.
+          const prevAuto = existing.filter((ss) => ss.auto === "withings").map((ss) => [ss.start, ss.end, ss.note].join("|")).sort().join(";");
+          const nextAuto = adds.map((ss) => [ss.start, ss.end, ss.note].join("|")).sort().join(";");
+          if (prevAuto === nextAuto) return;
           log[ds] = { ...day, sessions: [...kept, ...adds] };
           out.added += adds.length;
           changed = true;
@@ -1149,8 +1155,8 @@ const { useState, useEffect, useRef } = React;
           const oDays = (st && st.oura && st.oura.days) || [];
           const wDays = (st && st.withings && st.withings.days) || [];
           const byDay = {};
-          oDays.forEach((d) => { if (d && d.day && d.sleepHours != null && d.sleepHours > 0) byDay[d.day] = { day: d.day, sleepHours: d.sleepHours, src: "Oura" }; });
-          wDays.forEach((d) => { if (d && d.day && d.sleepHours != null && d.sleepHours > 0) byDay[d.day] = { day: d.day, sleepHours: d.sleepHours, src: "Withings" }; }); // Withings wins when both exist
+          wDays.forEach((d) => { if (d && d.day && d.sleepHours != null && d.sleepHours > 0) byDay[d.day] = { day: d.day, sleepHours: d.sleepHours, src: "Withings" }; });
+          oDays.forEach((d) => { if (d && d.day && d.sleepHours != null && d.sleepHours > 0) byDay[d.day] = { day: d.day, sleepHours: d.sleepHours, src: "Oura" }; }); // v7.63: Oura wins when both exist (Linda's call, Sept 27)
           const merged = Object.values(byDay);
           const res = merged.length ? syncSleepFromWithings(merged) : { found: 0, added: 0, skipped: 0, noCat: false };
           const latest = merged.map((d) => d.day).sort().slice(-1)[0] || null;

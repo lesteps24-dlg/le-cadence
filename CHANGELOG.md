@@ -4,6 +4,14 @@ Shell version is `APP_VERSION` near the top of `index.html` (inside QuickLogApp)
 `APP_VERSION`: Health, Muse, Streaks (ConsistencyApp), Practice. Bump the shell on every deploy; bump an app's
 version only when that app changed.
 
+## v7.63 — 2026-09-27
+- **Fix: a typed sleep block could vanish.** The Time tab's automatic sleep fill rewrote identical auto blocks on
+  every Health sync, which saved the row each time; on a second device that phantom save could beat a manual
+  entry and trigger the "updated on another device — reloaded" toast. It now writes only when the auto block
+  actually changes.
+- **Sleep auto-fill prefers Oura** over the Withings mat when both have a night (was Withings-first). The manual
+  override is unchanged: a sleep block you enter for a night replaces the automatic one for that night.
+
 ## v7.62 — 2026-09-27 (Today v1.7 · Health v3.98)
 - **Skip today.** Every undone step (except Periodic) has a small `skip` pill: a skipped step shows `—` and
   "skipped today", counts as met for the run, and never draws as ✓. `↺ undo` reverses it. Skips are stored in a
