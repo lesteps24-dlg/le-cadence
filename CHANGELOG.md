@@ -4,6 +4,15 @@ Shell version is `APP_VERSION` near the top of `index.html` (inside QuickLogApp)
 `APP_VERSION`: Health, Muse, Streaks (ConsistencyApp), Practice. Bump the shell on every deploy; bump an app's
 version only when that app changed.
 
+## v7.59 — 2026-09-27 (Today v1.4)
+- **Water is a goal, not a tap.** Three checkpoints against your Health water goal (80 oz): ⅓ by noon, ⅔ by
+  mid-afternoon (both optional prompts), and the full goal **done before evening** (core). A 2 oz glass no longer
+  ticks anything; each row shows `x of 80 oz · n more for this checkpoint`.
+- **Supplements split into noon and night.** Noon dose = at least one ticked (optional prompt); night dose = all
+  ticked (core). The log is per supplement, not per time, so this is the honest split available.
+- New **Afternoon** block between Noon and Evening; "now" marker follows the clock (Morning <11, Noon <14,
+  Afternoon <17, Evening).
+
 ## v7.58 — 2026-09-27 (Today v1.3)
 - **Fix: the weigh-in step never ticked.** Withings day records carry `weightLb` / `weightKg`; Today was reading a
   field called `weight` that doesn't exist. Now reads the right one in your chosen unit. Found on Linda's first

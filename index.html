@@ -85,7 +85,7 @@ const { useState, useEffect, useRef } = React;
     const SUPABASE_ANON  = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNsd2xuYnp4cmFpYXZwY2pidml5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQyMzg5NjksImV4cCI6MjA4OTgxNDk2OX0.-r80YRrZG2us0kQwFpo0IKbmYX45VsF8TFFnYPT3qsM";
     const TABLE         = "quick_log";
     const USER_KEY      = "linda";
-    const APP_VERSION   = "v7.58 · 2026-09-27";
+    const APP_VERSION   = "v7.59 · 2026-09-27";
     const TIME_ANALYZE_URL = "https://le-cadence-analyze.lesteps24.workers.dev/";
     const IDLE_GOAL_HRS = 1;   // target: no more than 1 hour of idle / TV per day
     const SESSION_TYPES = ["Study", "Class", "Quiz/Test", "Project", "Other"];
@@ -13452,7 +13452,7 @@ const PracticeApp = (function () {
 const TodayApp = (function () {
   const { useState, useEffect, useRef } = React;
   const sb = (typeof window !== "undefined" && window.__SB) ? window.__SB : null;
-  const APP_VERSION = "v1.3 · 2026-09-27";
+  const APP_VERSION = "v1.4 · 2026-09-27";
   const RUN_FROM = "2026-09-28";        // the run counts from this day — Linda's reset for Sept 28
   const STUDY_TARGET_MIN = 120;         // 2 h/day is the bar; 3 h is the stretch shown in the detail
   const STUDY_STRETCH_MIN = 180;
@@ -13476,6 +13476,7 @@ const TodayApp = (function () {
     const w = ((hd.withings && hd.withings.days) || []).find((d) => d.day === ds) || null;
     const water = ((hd.waterLog || {})[ds] || []);
     const waterOz = water.reduce((a, e) => a + (Number(e.oz) || 0), 0);
+    const waterGoal = Number(hd.waterGoal) || 80;
     const nut = (hd.nutritionLog || {})[ds] || {};
     const sessions = (st.sessions || []).filter((x) => x && x.start && toStr(new Date(x.start)) === ds);
     const studyMin = Math.round(sessions.reduce((a, x) => a + (x.secs || 0), 0) / 60);
@@ -13510,7 +13511,7 @@ const TodayApp = (function () {
     // v1.3: Withings days carry weightLb / weightKg (not "weight") — this is why the Sept 27 weigh-in never ticked
     const wU = (hd.weightUnit || "lb") === "kg" ? "kg" : "lb";
     const wVal = !w ? null : wU === "kg" ? (w.weightKg != null ? w.weightKg : (w.weightLb != null ? Math.round(w.weightLb / 2.20462 * 10) / 10 : null)) : (w.weightLb != null ? w.weightLb : (w.weightKg != null ? Math.round(w.weightKg * 2.20462 * 10) / 10 : null));
-    return { wholeDone, wholeAll, wholeN, sugar: !!nut.sugar, fastDone, fastMin, fastGoal, invHrs, invGoal, invAny: !!inv, suppN, suppTotal: supps.length, weight: wVal, steps: w && w.steps != null ? w.steps : null, waterOz, waterN: water.length,
+    return { wholeDone, wholeAll, wholeN, sugar: !!nut.sugar, fastDone, fastMin, fastGoal, invHrs, invGoal, invAny: !!inv, suppN, suppTotal: supps.length, waterGoal, weight: wVal, steps: w && w.steps != null ? w.steps : null, waterOz, waterN: water.length,
       lunch: !!(nut.lunch || nut.lFood), lunchTxt: nut.lFood || nut.lunch || "", dinner: !!(nut.dinner || nut.dFood), dinnerTxt: nut.dFood || nut.dinner || "",
       stopped: nut.stoppedTonight || "", studyMin, subjects, errs, qsets: qsets.length, drilled, plan, nextWeekPlanned, weightUnit: wU };
   }
@@ -13522,10 +13523,17 @@ const TodayApp = (function () {
     const S = [];
     S.push({ block: "Morning", id: "weigh", label: "Step on the Withings scale", core: true, done: f.weight != null, detail: f.weight != null ? `${f.weight} ${f.weightUnit} synced` : "waiting for Withings", go: ["health", "withings"] });
     S.push({ block: "Morning", id: "read", label: `Read Health → Today (${planTxt})`, core: false, done: visited(ds, "health"), detail: visited(ds, "health") ? "opened today" : "read only — plan banner and This Week card", go: ["health", "today"] });
-    S.push({ block: "Morning", id: "water", label: "Tap water once", core: true, done: f.waterN > 0, detail: f.waterN ? `${Math.round(f.waterOz)} oz · ${f.waterN} tap${f.waterN > 1 ? "s" : ""}` : "", go: ["health", "water"] });
+    // water: three checkpoints against the daily goal, finished by afternoon so nothing is drunk late. Only the last is core.
+    const oz = Math.round(f.waterOz), g = f.waterGoal, third = Math.ceil(g / 3), twoThirds = Math.ceil(g * 2 / 3);
+    const wd = (need) => `${oz} of ${g} oz` + (oz >= need ? "" : ` · ${need - oz} more for this checkpoint`);
+    S.push({ block: "Morning", id: "water1", label: `Water — ${third} oz by noon`, core: false, optional: true, done: oz >= third, detail: wd(third), go: ["health", "water"] });
+    S.push({ block: "Noon", id: "water2", label: `Water — ${twoThirds} oz by mid-afternoon`, core: false, optional: true, done: oz >= twoThirds, detail: wd(twoThirds), go: ["health", "water"] });
+    S.push({ block: "Afternoon", id: "water3", label: `Water — ${g} oz goal, done before evening`, core: true, done: oz >= g, detail: wd(g), go: ["health", "water"] });
     S.push({ block: "Noon", id: "lunch", label: "Log lunch (Same as yesterday if it repeats)", core: false, optional: true, done: f.lunch, detail: f.lunch ? f.lunchTxt.slice(0, 40) : "optional", go: ["health", "nutrition"] });
     S.push({ block: "Morning", id: "fast", label: `Fast ${Math.round(f.fastGoal / 60)} h (from last night's stop time)`, core: true, done: f.fastDone, detail: f.fastMin != null ? `${Math.floor(f.fastMin / 60)}h ${f.fastMin % 60}m${f.fastDone ? "" : " · set 'started eating' when you break it"}` : "needs last night's stop time + today's start time", go: ["health", "nutrition"] });
-    S.push({ block: "Noon", id: "supps", label: "Supplements", core: true, done: f.suppTotal > 0 && f.suppN >= f.suppTotal, detail: f.suppTotal ? `${f.suppN} of ${f.suppTotal}` : "none listed in Health → Supplements", go: ["health", "supp"] });
+    // supplements: noon dose = at least one ticked; night dose = all ticked (the log is per-supplement, not per-time)
+    S.push({ block: "Noon", id: "supps1", label: "Supplements — noon dose", core: false, optional: true, done: f.suppN > 0, detail: f.suppTotal ? `${f.suppN} of ${f.suppTotal} ticked` : "none listed in Health → Supplements", go: ["health", "supp"] });
+    S.push({ block: "Evening", id: "supps2", label: "Supplements — night dose (all ticked)", core: true, done: f.suppTotal > 0 && f.suppN >= f.suppTotal, detail: f.suppTotal ? `${f.suppN} of ${f.suppTotal}` : "none listed in Health → Supplements", go: ["health", "supp"] });
     const sh = Math.round(f.studyMin / 60 * 10) / 10;
     S.push({ block: "Evening", id: "timer", label: `Study ${STUDY_TARGET_MIN / 60} h on the timer (stretch ${STUDY_STRETCH_MIN / 60} h)`, core: true, done: f.studyMin >= STUDY_TARGET_MIN, detail: f.studyMin ? `${f.studyMin} of ${STUDY_TARGET_MIN} min${f.studyMin >= STUDY_STRETCH_MIN ? " · stretch hit" : f.studyMin >= STUDY_TARGET_MIN ? ` · ${STUDY_STRETCH_MIN - f.studyMin} to stretch` : ""}${f.subjects.length ? " · " + f.subjects.join(", ") : ""}` : "", go: ["study", "dash"] });
     S.push({ block: "Evening", id: "errors", label: "Log a question set + tag each miss", core: false, optional: true, done: f.qsets > 0 || f.errs > 0, detail: f.qsets || f.errs ? `${f.qsets} set${f.qsets === 1 ? "" : "s"} · ${f.errs} miss${f.errs === 1 ? "" : "es"} tagged` : "only if you did questions", go: ["study", "pmp", "errors"] });
@@ -13595,9 +13603,10 @@ const TodayApp = (function () {
     const coreLeft = S.filter((s) => s.core && !s.done);
     const run = runLength(hd, ql);
     const next = S.find((s) => !s.done && !s.optional) || S.find((s) => !s.done);
-    const blocks = [...new Set(S.map((s) => s.block))];
+    const ORDER = ["Morning", "Noon", "Afternoon", "Evening", "Sunday"];
+    const blocks = ORDER.filter((b) => S.some((s) => s.block === b));
     const hour = new Date().getHours();
-    const nowBlock = hour < 11 ? "Morning" : hour < 16 ? "Noon" : "Evening";
+    const nowBlock = hour < 11 ? "Morning" : hour < 14 ? "Noon" : hour < 17 ? "Afternoon" : "Evening";
 
     const card = { background: C.paper, border: `1px solid ${C.line}`, borderRadius: 14, padding: "14px 14px", marginBottom: 12 };
     return (
@@ -13652,7 +13661,7 @@ const TodayApp = (function () {
         })}
 
         <p style={{ fontFamily: mono, fontSize: 10, color: C.faint, textAlign: "center", lineHeight: 1.6, margin: "6px 0 0" }}>
-          Ticks come from your entries, not from this screen. Core steps (weigh · fast · water · supplements · 2 h study · dinner · stop time · whole foods · Invisalign) make the run, counted from Sept 28.<br />
+          Ticks come from your entries, not from this screen. Core steps (weigh · fast · water goal by afternoon · night supplements · 2 h study · dinner · stop time · whole foods · Invisalign) make the run, counted from Sept 28.<br />
           Sleep, steps, HRV and workouts sync themselves — never listed here.<br />TODAY · {APP_VERSION}
         </p>
       </div>
