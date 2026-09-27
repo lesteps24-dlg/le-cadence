@@ -4,6 +4,24 @@ Shell version is `APP_VERSION` near the top of `index.html` (inside QuickLogApp)
 `APP_VERSION`: Health, Muse, Streaks (ConsistencyApp), Practice. Bump the shell on every deploy; bump an app's
 version only when that app changed.
 
+## v7.58 — 2026-09-27 (Today v1.3)
+- **Fix: the weigh-in step never ticked.** Withings day records carry `weightLb` / `weightKg`; Today was reading a
+  field called `weight` that doesn't exist. Now reads the right one in your chosen unit. Found on Linda's first
+  real day — the headless test had used a made-up field name. Test data now mirrors the real record shape.
+
+## v7.57 — 2026-09-27 (Study: PMP plan rebuilt)
+
+- **PMP Roadmap rebuilt for the Sept 27 recalibration** (30 PMTI hours still open; Sept 30 target dropped).
+  Seven weeks from Sept 28: PMTI runs on the treadmill at 2× on cardio days (≈6 contact hrs/wk → 35 by ~Nov 1);
+  evenings are Study Hall only. Mocks: Oct 1 = baseline, **Oct 12 = reschedule gate** (≥65 keep · 55–64 keep +
+  4 h weekends · <55 reschedule before the free cutoff Oct 15), Nov 1, Nov 7. Boot camp Nov 9–12.
+- PMTI course pace line now counts to **Nov 1** and shows the weekly treadmill hours needed.
+- One-time migration (`study.pmpPlanV2`), additive: reframes the "Oct 1 mock" checklist item as BASELINE, adds
+  "★ Oct 12 re-mock — decision gate" and "PMTI 35 hrs on the treadmill by Nov 1". Items you edited are untouched.
+- Same migration sets the PMP subject to **2 h weekdays / 3.5 h weekend days** (weekly 17 h, goal 100 h) and
+  writes those minutes into the Schedule template (120 / 210) — only the PMP column; other subjects keep their
+  minutes. ON TRACK, the Study Today card and the Today tab's 2 h bar now grade against the same plan.
+
 ## v7.56 — 2026-09-27 (Today v1.2)
 - Today: link row under the header — **Inspiration · week by week (OneNote)**. More links go in `TODAY_LINKS`
   near the top of the Today app, one `[label, url]` per line.

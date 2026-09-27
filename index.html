@@ -85,7 +85,7 @@ const { useState, useEffect, useRef } = React;
     const SUPABASE_ANON  = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNsd2xuYnp4cmFpYXZwY2pidml5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQyMzg5NjksImV4cCI6MjA4OTgxNDk2OX0.-r80YRrZG2us0kQwFpo0IKbmYX45VsF8TFFnYPT3qsM";
     const TABLE         = "quick_log";
     const USER_KEY      = "linda";
-    const APP_VERSION   = "v7.56 · 2026-09-27";
+    const APP_VERSION   = "v7.58 · 2026-09-27";
     const TIME_ANALYZE_URL = "https://le-cadence-analyze.lesteps24.workers.dev/";
     const IDLE_GOAL_HRS = 1;   // target: no more than 1 hour of idle / TV per day
     const SESSION_TYPES = ["Study", "Class", "Quiz/Test", "Project", "Other"];
@@ -301,22 +301,20 @@ const { useState, useEffect, useRef } = React;
 
     // Rebuilt Sept 2026: PMTI recorded course + 2026 ECO weights (People 33% · Process 41% · Business Env 26%; ~60% agile/hybrid).
     // Runway to exam Sat Nov 14, 2026. Boot camp Nov 9–12.
-    // Rebuilt Sept 2026: 35 PMTI contact hours completed by Sept 30 (treadmill video ~7.5h/wk + desk ~3h/wk),
-    // then domain work on the 2026 ECO weights (Process 41 / People 33 / Business Env 26; ~60% agile-hybrid).
-    // Exam Sat Nov 14. Boot camp Nov 9-12.
+    // Rebuilt Sept 27 2026 (v7.57): 30 PMTI hours were still open at Sept 27, so the Sept 30 target was dropped.
+    // PMTI now runs on the treadmill at 2× on cardio days (4 × 45 min = 6 contact hrs/wk) → 35 hrs by ~Nov 1.
+    // Evenings are Study Hall only (2 h/day, 3–4 h weekend days). Mocks: Oct 1 baseline, Oct 12 decision gate
+    // (free reschedule until Oct 15), Nov 1, Nov 7. 2026 ECO weights: People 33 / Process 41 / Business Env 26.
+    // t = planned desk hours for the week (treadmill PMTI is on top and rides with cardio). Boot camp Nov 9–12.
     const PMP_WEEKS = [
-      { w: "Wk1", s: "2026-09-07", e: "2026-09-13", m: "Treadmill: PMTI at 2× (hours only — videos are 2021 content) · Desk: 2026 ECO + Study Hall lessons (the real exam content)", t: 10.5, mode: "surge" },
-      { w: "Wk2", s: "2026-09-14", e: "2026-09-20", m: "Treadmill: PMTI at 2× · Desk: Study Hall lessons + mini exams, error log", t: 10.5, mode: "surge" },
-      { w: "Wk3", s: "2026-09-21", e: "2026-09-27", m: "Treadmill: PMTI at 2× · Desk: Study Hall — weight toward Business Environment (26%, thin in 2021 material)", t: 10.5, mode: "surge" },
-      { w: "Wk4", s: "2026-09-28", e: "2026-09-30", m: "★ Finish 35 hrs · save completion certificate", t: 3.5, mode: "protected" },
-      { w: "Wk5", s: "2026-10-01", e: "2026-10-04", m: "★ Study Hall full-length by Oct 1 — reschedule gate · amend PMI education record", t: 6, mode: "surge" },
-      { w: "Wk6", s: "2026-10-05", e: "2026-10-11", m: "Domain II: Process (41%) — questions + error log", t: 8, mode: "protected" },
-      { w: "Wk7", s: "2026-10-12", e: "2026-10-18", m: "Domain I: People (33%) — questions + error log", t: 8, mode: "protected" },
-      { w: "Wk8", s: "2026-10-19", e: "2026-10-25", m: "Domain III: Business Environment (26% — tripled; your Treasury edge)", t: 8, mode: "protected" },
-      { w: "Wk9", s: "2026-10-26", e: "2026-11-01", m: "Agile & hybrid emphasis (~60%, all domains) + question bank", t: 8, mode: "moderate" },
-      { w: "Wk10", s: "2026-11-02", e: "2026-11-08", m: "Study Hall full-lengths (Pearson VUE-style) · work the error log", t: 10, mode: "surge" },
-      { w: "Wk11", s: "2026-11-09", e: "2026-11-12", m: "PMTI Boot Camp — 4 days, 8:00–5:30. Clear the calendar.", t: 38, mode: "surge" },
-      { w: "Exam", s: "2026-11-13", e: "2026-11-14", m: "Nov 13 light review + rest · Nov 14 EXAM 8:00 AM (arrive 7:30)", t: 3, mode: "light" },
+      { w: "Wk1", s: "2026-09-28", e: "2026-10-04", m: "Treadmill: PMTI 6 h at 2× (cardio days) · Desk: Study Hall mixed sets daily, tag every miss · ★ Oct 1 full-length = BASELINE, not a gate", t: 14, mode: "surge" },
+      { w: "Wk2", s: "2026-10-05", e: "2026-10-11", m: "Treadmill: PMTI 6 h · Desk: Process (41%) sets + error log review · target 150–200 questions cumulative", t: 14, mode: "surge" },
+      { w: "Wk3", s: "2026-10-12", e: "2026-10-18", m: "Treadmill: PMTI 6 h · ★ Oct 12 re-mock = reschedule gate (≥65 keep · 55–64 keep + 4 h weekends · <55 reschedule by Oct 15) · Desk: People (33%)", t: 14, mode: "surge" },
+      { w: "Wk4", s: "2026-10-19", e: "2026-10-25", m: "Treadmill: PMTI 6 h · Desk: Business Environment (26%) + weakest domain from the error log", t: 14, mode: "protected" },
+      { w: "Wk5", s: "2026-10-26", e: "2026-11-01", m: "Treadmill: ★ finish 35 PMTI hrs — request the completion certificate · Desk: agile/hybrid emphasis (~60%) · ★ Nov 1 full-length", t: 14, mode: "protected" },
+      { w: "Wk6", s: "2026-11-02", e: "2026-11-08", m: "Desk: Study Hall full-lengths (Pearson VUE-style) · EVM/formulas pass · work the error log · ★ Nov 7 full-length", t: 16, mode: "surge" },
+      { w: "Wk7", s: "2026-11-09", e: "2026-11-12", m: "PMTI Boot Camp — 4 days, 8:00–5:30. Clear the calendar.", t: 38, mode: "surge" },
+      { w: "Exam", s: "2026-11-13", e: "2026-11-14", m: "Nov 13 light review + rest · Nov 14 EXAM (confirm 8:00 AM vs 1:00 PM with Pearson VUE)", t: 3, mode: "light" },
     ];
 
     // Strategic Communication (MasterClass, ~16h self-paced). Light touch in Sept, paused through
@@ -575,6 +573,19 @@ const { useState, useEffect, useRef } = React;
       if (!Array.isArray(merged.study.scChecklist)) merged.study.scChecklist = SC_CHECKLIST.map((it, i) => ({ id: "sc" + i, label: it.label, note: it.note || "", status: it.status }));
       if (!Array.isArray(merged.study.ampChecklist)) merged.study.ampChecklist = AMP_CHECKLIST.map((it, i) => ({ id: "am" + i, label: it.label, note: it.note || "", status: it.status }));
       if (!Array.isArray(merged.study.pmpChecklist)) merged.study.pmpChecklist = PMP_APP_CHECKLIST.map((it, i) => ({ id: "ck" + i, label: it.label, note: it.note || "", status: it.status }));
+      if (!merged.study.pmpPlanV2) {   // v7.57 one-time: Sept 27 recalibration — adds the Oct 12 gate, reframes Oct 1 as baseline. Never touches items you edited.
+        const ck = merged.study.pmpChecklist.slice();
+        const oct1 = ck.find((it) => /full-length mock exam by Oct 1/i.test(it.label || ""));
+        if (oct1) { oct1.label = "Oct 1 full-length — BASELINE (score expected low; not the gate)"; oct1.note = "Take it cold-ish after 3 days of Study Hall. Purpose: a number to beat on Oct 12. Do not reschedule on this score."; }
+        if (!ck.some((it) => it.id === "ck_gate")) ck.splice(oct1 ? ck.indexOf(oct1) + 1 : ck.length, 0, { id: "ck_gate", label: "★ Oct 12 re-mock — reschedule decision gate", note: "After ~10 days of tagged Study Hall work. ≥65% keep Nov 14 · 55–64% keep + 4 h weekends · <55% reschedule before the free cutoff Oct 15.", status: "todo" });
+        if (!ck.some((it) => it.id === "ck_pmti_nov1")) ck.splice(ck.findIndex((it) => it.id === "ck_gate") + 1, 0, { id: "ck_pmti_nov1", label: "PMTI 35 hrs on the treadmill by Nov 1", note: "2× on cardio days, 4 × 45 min ≈ 6 contact hrs/wk. 30 hrs open at Sept 27. Missed cardio day = one weekend PMTI block, never an evening.", status: "progress" });
+        merged.study.pmpChecklist = ck; merged.study.pmpPlanV2 = true;
+        // 2 h weekdays / 3.5 h weekend days on the PMP subject and the Schedule template, so ON TRACK and the
+        // Today tab's 2 h bar grade against the same plan. Other subjects' minutes are left as they were.
+        merged.study.subjects = merged.study.subjects.map((su) => /pmp/i.test(su.name) ? { ...su, weekdayTarget: 2, weekendTarget: 3.5, weeklyTarget: 17, goalHrs: 100, cumGoal: 100 } : su);
+        const pmpId = (merged.study.subjects.find((su) => /pmp/i.test(su.name)) || {}).id;
+        if (pmpId) { const t = { ...(merged.study.planTemplate || {}) }; ["Mon", "Tue", "Wed", "Thu", "Fri"].forEach((d) => { t[d] = { ...(t[d] || {}), [pmpId]: 120 }; }); ["Sat", "Sun"].forEach((d) => { t[d] = { ...(t[d] || {}), [pmpId]: 210 }; }); merged.study.planTemplate = t; }
+      }
       // v7.52 — Excel Functions Challenge: seed the subject and the level map into state that already exists
       if (Array.isArray(merged.study.subjects) && !merged.study.subjects.some((su) => su.id === "su7"))
         merged.study.subjects = [...merged.study.subjects, { id: "su7", name: "Excel Functions", emoji: "📐", goalHrs: 12, weeklyTarget: 1, cumGoal: 12, dueDate: "2026-12-13", weekdayTarget: 0.25, weekendTarget: 0.5 }];
@@ -4056,7 +4067,7 @@ const { useState, useEffect, useRef } = React;
                   const pctH = totalH > 0 ? doneH / totalH * 100 : 0;
                   const contactPct = Math.min(100, doneH / 35 * 100);
                   const atSpeed = (h) => h / pmtiSpeed;
-                  const target = "2026-09-30";
+                  const target = "2026-11-01";   // v7.57: PMTI moved to the treadmill track — 6 h/wk finishes ~Nov 1
                   const daysLeft = Math.max(0, Math.round((parse(target) - parse(todayStr())) / 86400000));
                   const perDay = daysLeft > 0 ? atSpeed(Math.max(0, 35 - doneH)) / daysLeft : 0;
                   return (<>
@@ -4076,7 +4087,7 @@ const { useState, useEffect, useRef } = React;
                         ))}
                       </div>
                       <p style={{ fontFamily: "'DM Mono', monospace", fontSize: 9, color: daysLeft > 0 && perDay > 2.5 ? C.ember : C.faint, margin: "8px 0 0", lineHeight: 1.5 }}>
-                        {doneH >= 35 ? "35 contact hours covered — save the completion certificate." : `${daysLeft}d to Sept 30 · ${perDay.toFixed(1)}h/day at ${pmtiSpeed}× to hit 35`}
+                        {doneH >= 35 ? "35 contact hours covered — save the completion certificate." : `${daysLeft}d to Nov 1 · ${perDay.toFixed(1)}h/day at ${pmtiSpeed}× to hit 35 (≈ ${(perDay * 7).toFixed(1)} h/wk on the treadmill)`}
                       </p>
                       <p style={{ fontFamily: "'DM Mono', monospace", fontSize: 9, color: C.faint, margin: "6px 0 0", lineHeight: 1.5 }}>Course is 44h; only 35 are required. 2× on the treadmill — it's terminology, not exam content. ⏱ field = where you stopped, so you can scrub straight back to it.</p>
                     </div>
@@ -13441,7 +13452,7 @@ const PracticeApp = (function () {
 const TodayApp = (function () {
   const { useState, useEffect, useRef } = React;
   const sb = (typeof window !== "undefined" && window.__SB) ? window.__SB : null;
-  const APP_VERSION = "v1.2 · 2026-09-27";
+  const APP_VERSION = "v1.3 · 2026-09-27";
   const RUN_FROM = "2026-09-28";        // the run counts from this day — Linda's reset for Sept 28
   const STUDY_TARGET_MIN = 120;         // 2 h/day is the bar; 3 h is the stretch shown in the detail
   const STUDY_STRETCH_MIN = 180;
@@ -13496,9 +13507,12 @@ const TodayApp = (function () {
     // supplements: all listed taken
     const supps = hd.supplements || []; const sl = (hd.supplementLog || {})[ds] || {};
     const suppN = supps.filter((x) => sl[x.id]).length;
-    return { wholeDone, wholeAll, wholeN, sugar: !!nut.sugar, fastDone, fastMin, fastGoal, invHrs, invGoal, invAny: !!inv, suppN, suppTotal: supps.length, weight: w && w.weight != null ? w.weight : null, steps: w && w.steps != null ? w.steps : null, waterOz, waterN: water.length,
+    // v1.3: Withings days carry weightLb / weightKg (not "weight") — this is why the Sept 27 weigh-in never ticked
+    const wU = (hd.weightUnit || "lb") === "kg" ? "kg" : "lb";
+    const wVal = !w ? null : wU === "kg" ? (w.weightKg != null ? w.weightKg : (w.weightLb != null ? Math.round(w.weightLb / 2.20462 * 10) / 10 : null)) : (w.weightLb != null ? w.weightLb : (w.weightKg != null ? Math.round(w.weightKg * 2.20462 * 10) / 10 : null));
+    return { wholeDone, wholeAll, wholeN, sugar: !!nut.sugar, fastDone, fastMin, fastGoal, invHrs, invGoal, invAny: !!inv, suppN, suppTotal: supps.length, weight: wVal, steps: w && w.steps != null ? w.steps : null, waterOz, waterN: water.length,
       lunch: !!(nut.lunch || nut.lFood), lunchTxt: nut.lFood || nut.lunch || "", dinner: !!(nut.dinner || nut.dFood), dinnerTxt: nut.dFood || nut.dinner || "",
-      stopped: nut.stoppedTonight || "", studyMin, subjects, errs, qsets: qsets.length, drilled, plan, nextWeekPlanned, weightUnit: hd.weightUnit || "lb" };
+      stopped: nut.stoppedTonight || "", studyMin, subjects, errs, qsets: qsets.length, drilled, plan, nextWeekPlanned, weightUnit: wU };
   }
 
   /* ---- the routine, as steps. `core` steps make up the daily run. ---- */
