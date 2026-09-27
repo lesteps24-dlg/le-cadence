@@ -1,82 +1,235 @@
-// cadence-practice-worker.js
-// Deploy as a Cloudflare Worker, e.g. at cadence-practice.lesteps24.workers.dev
-// Set a secret: wrangler secret put ANTHROPIC_API_KEY
-// (same pattern as your existing cadence-insights Worker)
+/**
+ * Whoop v2 sync worker (Cloudflare).
+ * Mirrors the shape of your oura-worker so the app can consume it the same way:
+ *   GET  /            -> { days: [ { day, sleepHours, deep, rem, efficiency, latency,
+ *                                    breath, sleepScore, recovery, hrv, rhr, spo2, strain }, ... ] }
+ *   GET  /?days=21    -> same, custom window (default 21, capped 60)
+ *   GET  /auth        -> one-time: redirects you to Whoop consent
+ *   GET  /callback    -> Whoop redirects here; stores your refresh token, shows "connected"
+ *   GET  /health      -> quick status (are we connected?)
+ *
+ * Whoop hands back a NEW refresh token on every refresh and kills the old one, so we persist
+ * it to KV (binding: WHOOP_KV) every cycle. The token never touches the browser.
+ *
+ * Bindings / vars to set in the Cloudflare dashboard:
+ *   - KV namespace binding:  WHOOP_KV
+ *   - Secret:  WHOOP_CLIENT_ID
+ *   - Secret:  WHOOP_CLIENT_SECRET
+ * Redirect URI to register in the Whoop dashboard:  https://<this-worker>/callback
+ */
+
+const AUTH_URL = "https://api.prod.whoop.com/oauth/oauth2/auth";
+const TOKEN_URL = "https://api.prod.whoop.com/oauth/oauth2/token";
+const API = "https://api.prod.whoop.com/developer";
+const SCOPES = "offline read:sleep read:recovery read:cycles";
+const KV_KEY = "whoop_refresh_token";
+
+const CORS = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "GET, OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type",
+};
+
+function json(obj, status = 200) {
+  return new Response(JSON.stringify(obj), { status, headers: { "Content-Type": "application/json", ...CORS } });
+}
+function html(body, status = 200) {
+  return new Response(`<!doctype html><meta name=viewport content="width=device-width,initial-scale=1"><body style="font-family:system-ui;max-width:560px;margin:40px auto;padding:0 16px;line-height:1.5;color:#211D17">${body}</body>`, { status, headers: { "Content-Type": "text/html" } });
+}
+
+// ISO timestamp + offset like "-04:00" -> local "YYYY-MM-DD"
+function localDate(iso, offset) {
+  if (!iso) return null;
+  let ms = Date.parse(iso);
+  if (isNaN(ms)) return null;
+  if (offset && /^[+-]\d{2}:\d{2}$/.test(offset)) {
+    const sign = offset[0] === "-" ? -1 : 1;
+    const mins = parseInt(offset.slice(1, 3), 10) * 60 + parseInt(offset.slice(4, 6), 10);
+    ms += sign * mins * 60000;
+  }
+  return new Date(ms).toISOString().slice(0, 10);
+}
+const round1 = (n) => (n == null ? null : Math.round(n * 10) / 10);
+const msToHr = (ms) => (ms == null ? null : round1(ms / 3600000));
+const msToMin = (ms) => (ms == null ? null : Math.round(ms / 60000));
+
+async function refreshAccessToken(env) {
+  const stored = await env.WHOOP_KV.get(KV_KEY);
+  if (!stored) throw new Error("not_connected");
+  const body = new URLSearchParams({
+    grant_type: "refresh_token",
+    refresh_token: stored,
+    client_id: env.WHOOP_CLIENT_ID,
+    client_secret: env.WHOOP_CLIENT_SECRET,
+    scope: "offline",
+  });
+  const r = await fetch(TOKEN_URL, { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body });
+  if (!r.ok) throw new Error("refresh_failed_" + r.status);
+  const t = await r.json();
+  // Whoop rotates the refresh token — persist the new one immediately or the next sync breaks.
+  if (t.refresh_token) await env.WHOOP_KV.put(KV_KEY, t.refresh_token);
+  return t.access_token;
+}
+
+async function pagedGet(path, token, startISO, endISO) {
+  const out = [];
+  let nextToken = null;
+  for (let guard = 0; guard < 6; guard++) {
+    const u = new URL(API + path);
+    u.searchParams.set("limit", "25");
+    if (startISO) u.searchParams.set("start", startISO);
+    if (endISO) u.searchParams.set("end", endISO);
+    if (nextToken) u.searchParams.set("nextToken", nextToken);
+    const r = await fetch(u.toString(), { headers: { Authorization: "Bearer " + token } });
+    if (!r.ok) throw new Error("api_" + r.status + "_" + path);
+    const j = await r.json();
+    (j.records || []).forEach((rec) => out.push(rec));
+    nextToken = j.next_token || null;
+    if (!nextToken) break;
+  }
+  return out;
+}
+
+async function buildDays(env, days) {
+  const token = await refreshAccessToken(env);
+  const end = new Date();
+  const start = new Date(end.getTime() - days * 86400000);
+  const startISO = start.toISOString();
+  const endISO = end.toISOString();
+
+  const safeGet = async (path) => {
+    try { return { data: await pagedGet(path, token, startISO, endISO) }; }
+    catch (e) { return { data: [], error: String(e && e.message || e) }; }
+  };
+  const [sl, rc, cy] = await Promise.all([
+    safeGet("/v2/activity/sleep"),
+    safeGet("/v2/recovery"),
+    safeGet("/v2/cycle"),
+  ]);
+  const warnings = [];
+  if (sl.error) warnings.push("sleep: " + sl.error);
+  if (rc.error) warnings.push("recovery: " + rc.error);
+  if (cy.error) warnings.push("cycle/strain: " + cy.error);
+  const sleeps = sl.data, recoveries = rc.data, cycles = cy.data;
+
+  const map = {}; // day -> record
+  const dayOf = (d) => (map[d] = map[d] || { day: d });
+  const sleepIdToDay = {};
+
+  // main night sleeps (skip naps)
+  sleeps.forEach((s) => {
+    if (s.nap) return;
+    const day = localDate(s.end, s.timezone_offset);
+    if (!day) return;
+    sleepIdToDay[s.id] = day;
+    const d = dayOf(day);
+    const sc = s.score || {};
+    const ss = sc.stage_summary || {};
+    const inBed = ss.total_in_bed_time_milli;
+    const awake = ss.total_awake_time_milli || 0;
+    if (inBed != null) d.sleepHours = msToHr(inBed - awake);
+    if (inBed != null) d.inBedHours = msToHr(inBed);
+    d.deep = msToMin(ss.total_slow_wave_sleep_time_milli);
+    d.rem = msToMin(ss.total_rem_sleep_time_milli);
+    d.light = msToMin(ss.total_light_sleep_time_milli);
+    if (awake) d.awakeMin = msToMin(awake);
+    if (ss.disturbance_count != null) d.disturbances = ss.disturbance_count;
+    if (ss.sleep_cycle_count != null) d.cycles = ss.sleep_cycle_count;
+    if (sc.sleep_efficiency_percentage != null) d.efficiency = round1(sc.sleep_efficiency_percentage);
+    if (sc.sleep_performance_percentage != null) d.sleepScore = Math.round(sc.sleep_performance_percentage);
+    if (sc.sleep_consistency_percentage != null) d.consistency = Math.round(sc.sleep_consistency_percentage);
+    if (sc.respiratory_rate != null) d.breath = round1(sc.respiratory_rate);
+  });
+
+  // recovery (recovery_score -> readiness slot; plus hrv/rhr/spo2)
+  recoveries.forEach((rec) => {
+    const day = sleepIdToDay[rec.sleep_id] || localDate(rec.created_at, null);
+    if (!day) return;
+    const d = dayOf(day);
+    const sc = rec.score || {};
+    if (sc.recovery_score != null) d.recovery = Math.round(sc.recovery_score);
+    if (sc.hrv_rmssd_milli != null) { let h = sc.hrv_rmssd_milli; if (h < 1) h = h * 1000; d.hrv = Math.round(h); } // normalize seconds->ms so it lines up with Oura/Withings
+    if (sc.resting_heart_rate != null) d.rhr = Math.round(sc.resting_heart_rate);
+    if (sc.spo2_percentage != null) d.spo2 = round1(sc.spo2_percentage);
+  });
+
+  // strain (cycle.score.strain, 0-21)
+  cycles.forEach((c) => {
+    const day = localDate(c.start, c.timezone_offset);
+    if (!day) return;
+    const d = dayOf(day);
+    const sc = c.score || {};
+    if (sc.strain != null) d.strain = round1(sc.strain);
+  });
+
+  return { days: Object.values(map).sort((a, b) => (a.day < b.day ? 1 : -1)), warnings }; // newest first
+}
 
 export default {
   async fetch(request, env) {
-    const cors = {
-      "Access-Control-Allow-Origin": "*",
-      "Access-Control-Allow-Methods": "POST, OPTIONS",
-      "Access-Control-Allow-Headers": "content-type",
-    };
-    if (request.method === "OPTIONS") return new Response(null, { headers: cors });
-    if (request.method !== "POST") {
-      return new Response(JSON.stringify({ error: "POST only" }), { status: 405, headers: { "content-type": "application/json", ...cors } });
-    }
-
-    let body;
-    try { body = await request.json(); } catch (e) {
-      return new Response(JSON.stringify({ error: "bad json" }), { status: 400, headers: { "content-type": "application/json", ...cors } });
-    }
-
-    const { task, payload } = body || {};
-    if (!task || !payload) {
-      return new Response(JSON.stringify({ error: "missing task or payload" }), { status: 400, headers: { "content-type": "application/json", ...cors } });
-    }
-
-    let system, messages, maxTokens = 2000;
-
-    if (task === "bingo") {
-      system = payload.systemPrep + " Return ONLY valid JSON, no preamble, no markdown fences, in this exact shape: {\"questions\":[{\"tag\":\"short 2-3 word category\",\"question\":\"the likely question, one sentence\"}]} with exactly 4 items.";
-      messages = [{ role: "user", content: "Here is the message/ask being prepared, structured as What/So What/Now What:\n\"" + payload.pitch + "\"\nPredict the 4 most likely questions or points of hesitation." }];
-      maxTokens = 2000;
-    } else if (task === "roleplay") {
-      system = payload.systemRoleplay + "\n\nCRITICAL OUTPUT FORMAT: Your entire output must be a single JSON object and nothing else. Do not write dialogue outside the JSON. Do not use markdown fences. The exact shape is: {\"reply\": \"<your in-character spoken reply>\", \"coach_note\": \"<brief 5-9 word coaching observation on the user's most recent message>\"}. The in-character dialogue goes inside the \"reply\" field. Escape any double quotes inside the reply.";
-      messages = [
-        { role: "user", content: "[Context: opening message being presented — \"" + payload.pitch + "\". Respond in character to what follows.]" },
-        ...(payload.history || [])
-      ];
-      maxTokens = 1500;
-    } else if (task === "debrief" && payload.mode === "personal") {
-      system = "You are a direct, honest coach reviewing a rehearsal of a PERSONAL conversation between the user and her long-term partner. This is not persuasion and must not be scored as persuasion. The user asked for blunt feedback. Her partner's two standing criticisms of her are that she 'doesn't think' (acts, decides, buys, plans without registering him first) and that she 'loses her temper too quick' (which he experiences as disrespect). He is highly perceptive; he reads a shift in tone instantly. Judge only these things: (1) THE PAUSE — did the user register what he said before responding, or did she react? Quote the exact line where she reacted fastest. (2) TEMPER — any sharpness, defensiveness, sarcasm, or raised intensity, even mild. Name the line. This is the single most important item. (3) ASSUMPTIONS — count the things she stated as fact about his feelings or wants without asking. (4) TELL-BEFORE-ACT — did she announce decisions that affect him before making them, or present them done? (5) SILENCE — after a real question, did she wait, or fill the gap? (6) Did she need him to reassure her, or make it about her guilt? (7) MONEY — she earns considerably more; if money came up, did she ADVISE (rank) or bring a shared decision and ask? Advising is a fault even when the advice is right. (8) OVERRIDE — he leads a team of forty at work and is respected there; if she asked his view and then overrode it, or decided something in his domain without him, quote it. That is the sharpest cut. Lead with the single most damaging moment and quote it. No sandwiching. 'What worked' is one specific sentence or 'Nothing notable'. Score: 90+ she paused, stayed level, asked more than told; 75-89 mostly level with one reactive moment; 60-74 reactive or telling more than asking; below 60 temper showed or she ran a plan at him. CRITICAL OUTPUT FORMAT: single JSON object, nothing else, no fences, single quotes for quoted speech. Exact shape and key order: {\"score\": <integer 0-100>, \"verdict\": \"<4-6 words, blunt>\", \"biggest_problem\": \"<the moment that hurt most, quoted, and what he likely read into it — 2-3 sentences>\", \"strength\": \"<one specific sentence or 'Nothing notable'>\", \"hesitation_diagnosis\": \"<WHERE YOU REACTED: the fastest reply in the exchange and what a pause would have changed — 1-2 sentences>\", \"adjustment\": \"<ASK HIM FOR REAL: one or two questions in words she could actually say, that replace an assumption she made — this is the key field>\"}";
-      messages = [{ role: "user", content: "Rehearsal with partner. What the user wanted going in: \"" + payload.pitch + "\"\n\nTranscript:\n" + payload.transcriptText }];
-      maxTokens = 3000;
-    } else if (task === "debrief") {
-      system = "You are a harsh, direct communication coach reviewing a rehearsal. The user has explicitly asked for blunt criticism, not encouragement. Framework: MasterClass Strategic Communication (What?-So What?-Now What? structure; persuasive dimensions ethos/pathos/logos/mythos/kairos; hesitation categories: risk, accountability, ambiguity, status quo pressure, social uncertainty, misaligned incentives). Rules: lead with the single most damaging thing in the exchange and say plainly what it cost. Name the exact sentence or moment where it went wrong when you can. Do not soften, do not sandwich, do not open with praise. 'What worked' gets one sentence maximum and must be specific — no generic compliments. The adjustment must be concrete enough to do next time without interpretation: a sentence to say, a thing to cut, an order to change. Score strictly: 90+ means genuinely ready to walk into the real room with no changes; 75-89 close with one fixable gap; 60-74 a real revision needed; below 60 the objective or structure itself is not there yet. If the persona is Tim, also judge whether the user was decisive on routine items but deliberately asked his direction on the one or two genuinely critical decisions — either extreme (indecisive everywhere, or leaving him no room at all) is a gap. CRITICAL OUTPUT FORMAT: your entire output must be a single JSON object and nothing else — no preamble, no commentary, no markdown fences. Do not use double quotes inside string values; use single quotes for any quoted speech. Exact shape and key order: {\"score\": <integer 0-100>, \"verdict\": \"<4-6 words, blunt>\", \"biggest_problem\": \"<the one thing that hurt most, what it cost, and where it happened — 2-3 sentences>\", \"strength\": \"<one specific sentence, or 'Nothing notable' if true>\", \"hesitation_diagnosis\": \"<which hesitation category the persona showed and what triggered it — 1-2 sentences>\", \"adjustment\": \"<one concrete change for next time, actionable without interpretation — 1-2 sentences>\"}";
-      messages = [{ role: "user", content: "Scenario persona: " + payload.personaLabel + ".\nOpening message: \"" + payload.pitch + "\"\n\nTranscript:\n" + payload.transcriptText }];
-      maxTokens = 3000;
-    } else {
-      return new Response(JSON.stringify({ error: "unknown task" }), { status: 400, headers: { "content-type": "application/json", ...cors } });
-    }
+    const url = new URL(request.url);
+    const path = url.pathname.replace(/\/$/, "") || "/";
+    if (request.method === "OPTIONS") return new Response(null, { headers: CORS });
+    const redirectUri = url.origin + "/callback";
 
     try {
-      const anthropicRes = await fetch("https://api.anthropic.com/v1/messages", {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          "x-api-key": env.ANTHROPIC_API_KEY,
-          "anthropic-version": "2023-06-01",
-        },
-        body: JSON.stringify({
-          model: "claude-sonnet-5",
-          max_tokens: maxTokens,
-          system,
-          messages,
-        }),
-      });
-      const data = await anthropicRes.json();
-      if (!anthropicRes.ok || data.error) {
-        const msg = (data.error && (data.error.message || data.error.type)) || ("HTTP " + anthropicRes.status);
-        return new Response(JSON.stringify({ error: "Anthropic API: " + msg }), { status: 502, headers: { "content-type": "application/json", ...cors } });
+      if (path === "/auth") {
+        const a = new URL(AUTH_URL);
+        a.searchParams.set("response_type", "code");
+        a.searchParams.set("client_id", env.WHOOP_CLIENT_ID);
+        a.searchParams.set("redirect_uri", redirectUri);
+        a.searchParams.set("scope", SCOPES);
+        a.searchParams.set("state", crypto.randomUUID());
+        return Response.redirect(a.toString(), 302);
       }
-      const text = (data.content || []).filter(b => b.type === "text").map(b => b.text).join("\n");
-      if (!text.trim()) {
-        return new Response(JSON.stringify({ error: "Empty reply from model (stop_reason: " + (data.stop_reason || "unknown") + "). The prompt may have been declined." }), { status: 502, headers: { "content-type": "application/json", ...cors } });
+
+      if (path === "/callback") {
+        const err = url.searchParams.get("error");
+        if (err) return html("<h2>Whoop returned an error</h2><p style='font-family:monospace;background:#EFE7D6;padding:10px 12px;border-radius:8px'><b>" + err + "</b><br>" + (url.searchParams.get("error_description") || "") + "</p><p>Start over at <a href='/auth'>/auth</a>.</p>", 400);
+        const code = url.searchParams.get("code");
+        if (!code) return html("<h2>Missing code</h2><p>No <code>code</code> or <code>error</code> came back from Whoop. Start fresh at <a href='/auth'>/auth</a> and approve without using back/refresh.</p>", 400);
+        const body = new URLSearchParams({
+          grant_type: "authorization_code",
+          code,
+          client_id: env.WHOOP_CLIENT_ID,
+          client_secret: env.WHOOP_CLIENT_SECRET,
+          redirect_uri: redirectUri,
+        });
+        const r = await fetch(TOKEN_URL, { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body });
+        if (!r.ok) return html("<h2>Token exchange failed</h2><p>Status " + r.status + ". Check client id/secret and redirect URI.</p>", 500);
+        const t = await r.json();
+        if (!t.refresh_token) return html("<h2>No refresh token returned</h2><p>Make sure the <code>offline</code> scope is included.</p>", 500);
+        await env.WHOOP_KV.put(KV_KEY, t.refresh_token);
+        return html("<h2>✓ Whoop connected</h2><p>You can close this tab. Le Cadence will start pulling Whoop as a fallback source.</p>");
       }
-      return new Response(JSON.stringify({ text }), { headers: { "content-type": "application/json", ...cors } });
-    } catch (err) {
-      return new Response(JSON.stringify({ error: String(err) }), { status: 500, headers: { "content-type": "application/json", ...cors } });
+
+      if (path === "/setup") {
+        return html(
+          "<h2>Le Cadence · Whoop setup</h2>" +
+          "<p>Register this <b>exact</b> redirect URI in your Whoop app (Developer Dashboard → your app → Redirect URIs). Copy it verbatim — no trailing slash, no spaces:</p>" +
+          "<p style='font-family:monospace;font-size:15px;background:#EFE7D6;padding:12px 14px;border-radius:8px;word-break:break-all;user-select:all'>" + redirectUri + "</p>" +
+          "<p>Once it's saved in Whoop, tap below to connect:</p>" +
+          "<p><a href='/auth' style='display:inline-block;background:#1E2A4A;color:#fff;text-decoration:none;padding:10px 18px;border-radius:8px'>Connect Whoop →</a></p>" +
+          "<p class='note' style='color:#6b6253;font-size:13px'>If connecting still fails, the URI above and the one in Whoop don't match character-for-character — that's the whole problem.</p>"
+        );
+      }
+
+      if (path === "/health") {
+        const has = !!(await env.WHOOP_KV.get(KV_KEY));
+        return json({ connected: has, redirect_uri: redirectUri, scopes: SCOPES });
+      }
+
+      // default: data
+      let days = parseInt(url.searchParams.get("days") || "21", 10);
+      if (isNaN(days) || days < 1) days = 21;
+      if (days > 60) days = 60;
+      const result = await buildDays(env, days);
+      return json({ days: result.days, count: result.days.length, warnings: result.warnings, source: "whoop" });
+    } catch (e) {
+      const msg = String(e && e.message || e);
+      if (msg === "not_connected") return json({ error: "not_connected", hint: "Visit /auth once to connect Whoop." }, 401);
+      if (msg.startsWith("refresh_failed")) return json({ error: msg, hint: "Refresh token expired or revoked — visit /auth again." }, 401);
+      return json({ error: msg }, 500);
     }
   },
 };
