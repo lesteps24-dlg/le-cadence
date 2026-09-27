@@ -4,6 +4,14 @@ Shell version is `APP_VERSION` near the top of `index.html` (inside QuickLogApp)
 `APP_VERSION`: Health, Muse, Streaks (ConsistencyApp), Practice. Bump the shell on every deploy; bump an app's
 version only when that app changed.
 
+## v7.65 — 2026-09-27 (Today v1.8 · Health v3.99)
+- **Three things today** — a card under Next on the Today tab: three lines you type, tick by hand. Stored per day
+  in `today_state`, so it follows you across devices. "↧ carry n unfinished from yesterday" pulls forward what
+  you didn't finish. Not part of the run — these are intentions, not entries the app can verify.
+- **Steps ramp restarted** (one-time migration): 5,500 from Sept 28, +1,000 each Monday → 10,000 on Nov 2. Ramp
+  entries before Sept 28 are kept so earlier days are judged as they were. Editable as before in Health →
+  Settings → Daily step goal · Ramp; the Today "Walk" step reads the same ramp.
+
 ## v7.64 — 2026-09-27 (Muse v1.16)
 - **Oura is now the primary sleep source, end to end.** The `oura-sync` Worker already returned the full ring
   dataset (stages, efficiency, latency, HRV, lowest/average HR, breathing rate, sleep score, readiness,

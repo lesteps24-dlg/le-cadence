@@ -85,7 +85,7 @@ const { useState, useEffect, useRef } = React;
     const SUPABASE_ANON  = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNsd2xuYnp4cmFpYXZwY2pidml5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQyMzg5NjksImV4cCI6MjA4OTgxNDk2OX0.-r80YRrZG2us0kQwFpo0IKbmYX45VsF8TFFnYPT3qsM";
     const TABLE         = "quick_log";
     const USER_KEY      = "linda";
-    const APP_VERSION   = "v7.64 · 2026-09-27";
+    const APP_VERSION   = "v7.65 · 2026-09-27";
     const TIME_ANALYZE_URL = "https://le-cadence-analyze.lesteps24.workers.dev/";
     const IDLE_GOAL_HRS = 1;   // target: no more than 1 hour of idle / TV per day
     const SESSION_TYPES = ["Study", "Class", "Quiz/Test", "Project", "Other"];
@@ -5343,7 +5343,7 @@ const { useState, useEffect, useRef } = React;
     const TABLE         = "hundred_days";
     const USER_KEY      = "linda";              // any fixed label; names your single saved row
     const ANALYZE_URL   = "https://hundred-days-analyze.lesteps24.workers.dev/";                   // your trends Worker
-    const APP_VERSION   = "v3.98 · 2026-09-27";  // bump this each update so you can confirm a deploy
+    const APP_VERSION   = "v3.99 · 2026-09-27";  // bump this each update so you can confirm a deploy
     const DEMO_URL      = "https://www.instagram.com/reel/DWACMUODNN1/";  // Movement routine demo
     /* ============================================================ */
 
@@ -5728,6 +5728,11 @@ const { useState, useEffect, useRef } = React;
       if (!merged.nutritionLog || typeof merged.nutritionLog !== "object") merged.nutritionLog = {};
       if (!Array.isArray(merged.hiddenViews)) merged.hiddenViews = [];   // v3.95: tabs hidden in Settings → Tabs
       if (!Array.isArray(merged.savedMeals)) merged.savedMeals = [];     // v3.98: [{ id, name, slot: "b"|"l"|"d", food, whole, time }]
+      if (!merged.stepsRampV2) {   // v3.99 one-time (Sept 27): restart the ramp at 5,500 from Sept 28, +1,000 each Monday to 10,000. Entries before Sept 28 are kept so history isn't re-judged.
+        const keep = (Array.isArray(merged.stepsRamp) ? merged.stepsRamp : []).filter((r) => r && r.from < "2026-09-28");
+        merged.stepsRamp = [...keep, { from: "2026-09-28", goal: 5500 }, { from: "2026-10-05", goal: 6500 }, { from: "2026-10-12", goal: 7500 }, { from: "2026-10-19", goal: 8500 }, { from: "2026-10-26", goal: 9500 }, { from: "2026-11-02", goal: 10000 }];
+        merged.stepsRampV2 = true;
+      }
       if (!Array.isArray(merged.resetMoves) || merged.resetMoves.length === 0) merged.resetMoves = def.resetMoves;
       merged.resetMoves = merged.resetMoves.map((m) => ({ id: m.id, name: m.name, secs: typeof m.secs === "number" ? m.secs : 60 }));
       if (typeof merged.resetRest !== "number") merged.resetRest = def.resetRest;
@@ -13498,7 +13503,7 @@ const PracticeApp = (function () {
 const TodayApp = (function () {
   const { useState, useEffect, useRef } = React;
   const sb = (typeof window !== "undefined" && window.__SB) ? window.__SB : null;
-  const APP_VERSION = "v1.7 · 2026-09-27";
+  const APP_VERSION = "v1.8 · 2026-09-27";
   const RUN_FROM = "2026-09-28";        // the run counts from this day — Linda's reset for Sept 28
   const STUDY_TARGET_MIN = 120;         // 2 h/day is the bar; 3 h is the stretch shown in the detail
   const STUDY_STRETCH_MIN = 180;
@@ -13669,16 +13674,23 @@ const TodayApp = (function () {
         tSeen.current = data ? (data.updated_at || "") : null; tLocal.current = false; setTstate((data && data.state) || {});
       } catch (e) { tLocal.current = true; setTstate(readLocalT()); }   // table missing → this browser only
     };
-    const toggleSkip = async (ds, id) => {
+    const saveT = async (next, localMsg) => {
+      setTstate(next);
+      if (tLocal.current || !sb) { try { window.localStorage.setItem("lc_today_state", JSON.stringify(next)); } catch (e) {} if (localMsg) window.__lcToast(localMsg + " (this device only — today_state table not set up)"); return; }
+      try { tSeen.current = await window.__lcSave(sb, TODAY_TABLE, "linda", next, tSeen.current); }
+      catch (e) { if (e && e.code === "LC_CONFLICT" && e.row) { tSeen.current = e.row.updated_at || ""; setTstate(e.row.state || {}); window.__lcToast("Today: updated on another device — reloaded"); } else { window.__lcToast("Couldn't save — " + (e.message || e)); } }
+    };
+    const toggleSkip = (ds, id) => {
       const cur = tstate || {}; const day = (cur.skips || {})[ds] || [];
       const nextDay = day.includes(id) ? day.filter((x) => x !== id) : [...day, id];
       const next = { ...cur, skips: { ...(cur.skips || {}), [ds]: nextDay } };
       Object.keys(next.skips).sort().slice(0, -60).forEach((old) => delete next.skips[old]);
-      setTstate(next);
-      if (tLocal.current || !sb) { try { window.localStorage.setItem("lc_today_state", JSON.stringify(next)); } catch (e) {} window.__lcToast(day.includes(id) ? "Un-skipped (this device only — today_state table not set up)" : "Skipped today (this device only — today_state table not set up)"); return; }
-      try { tSeen.current = await window.__lcSave(sb, TODAY_TABLE, "linda", next, tSeen.current); }
-      catch (e) { if (e && e.code === "LC_CONFLICT" && e.row) { tSeen.current = e.row.updated_at || ""; setTstate(e.row.state || {}); window.__lcToast("Today: updated on another device — reloaded"); } else { window.__lcToast("Couldn't save the skip — " + (e.message || e)); } }
+      return saveT(next, day.includes(id) ? "Un-skipped" : "Skipped today");
     };
+    /* v1.8 — Three things: the day's three priorities, typed by hand, ticked by hand. Stored per day in today_state.three. */
+    const threeFor = (ds) => { const t = ((tstate || {}).three || {})[ds]; const base = [0, 1, 2].map((i) => (t && t[i]) || { t: "", d: false }); return base; };
+    const setThree = (ds, list) => { const cur = tstate || {}; const next = { ...cur, three: { ...(cur.three || {}), [ds]: list } }; Object.keys(next.three).sort().slice(0, -60).forEach((old) => delete next.three[old]); return saveT(next); };
+    const threeDraft = useRef({});   // uncommitted text per index while typing
     const [signedIn, setSignedIn] = useState(true);
     useEffect(() => { if (!sb) return; sb.auth.getSession().then(({ data }) => setSignedIn(!!(data && data.session))).catch(() => {}); const { data: sub } = sb.auth.onAuthStateChange((_e, sess) => { setSignedIn(!!sess); if (sess) load(); }); return () => { try { sub.subscription.unsubscribe(); } catch (e) {} }; }, []);
     const [err, setErr] = useState("");
@@ -13764,6 +13776,30 @@ const TodayApp = (function () {
           </button>
         )}
 
+        {(() => {
+          const three = threeFor(ds); const doneN = three.filter((x) => x.d).length; const filled = three.filter((x) => x.t.trim()).length;
+          const yList = threeFor(addDays(ds, -1)).filter((x) => x.t.trim() && !x.d);
+          const carry = () => { const cur = three.slice(); let k = 0; yList.forEach((y) => { while (k < 3 && cur[k].t.trim()) k++; if (k < 3) { cur[k] = { t: y.t, d: false }; k++; } }); setThree(ds, cur); };
+          return (
+            <div style={card}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 6 }}>
+                <span style={{ fontFamily: mono, fontSize: 10, letterSpacing: 1.2, textTransform: "uppercase", color: C.ink, fontWeight: 700 }}>Three things today</span>
+                <span style={{ fontFamily: mono, fontSize: 10.5, color: filled && doneN === filled ? C.sage : C.faint }}>{doneN}/{filled || 3}</span>
+              </div>
+              {three.map((x, i) => (
+                <div key={i} style={{ display: "flex", alignItems: "center", gap: 10, borderTop: `1px solid ${C.bg}`, padding: "7px 2px" }}>
+                  <button onClick={() => { if (!x.t.trim()) return; const cur = three.slice(); cur[i] = { ...x, d: !x.d }; setThree(ds, cur); }} style={{ width: 22, height: 22, borderRadius: 7, flexShrink: 0, border: `1.5px solid ${x.d ? C.sage : C.line}`, background: x.d ? C.sage : "transparent", color: C.paper, fontSize: 13, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>{x.d ? "✓" : ""}</button>
+                  <input defaultValue={x.t} key={ds + "-" + i + "-" + x.t} placeholder={["The one thing that must happen", "Second", "Third"][i]}
+                    onChange={(e) => { threeDraft.current[i] = e.target.value; }}
+                    onBlur={(e) => { const v = e.target.value; if (v === x.t) return; const cur = three.slice(); cur[i] = { t: v, d: v.trim() ? x.d : false }; setThree(ds, cur); }}
+                    onKeyDown={(e) => { if (e.key === "Enter") e.target.blur(); }}
+                    style={{ flex: 1, minWidth: 0, border: "none", background: "transparent", fontFamily: font, fontSize: 14.5, fontWeight: 600, color: x.d ? C.soft : C.ink, textDecoration: x.d ? "line-through" : "none", textDecorationColor: C.faint, padding: "4px 0", outline: "none" }} />
+                </div>
+              ))}
+              {yList.length && filled < 3 ? <button onClick={carry} style={{ marginTop: 6, background: "transparent", border: `1px solid ${C.line}`, borderRadius: 999, color: C.soft, fontFamily: mono, fontSize: 9.5, padding: "4px 9px", cursor: "pointer" }}>↧ carry {yList.length} unfinished from yesterday</button> : null}
+            </div>
+          );
+        })()}
         {blocks.map((b) => {
           const items = S.filter((s) => s.block === b);
           const dn = items.filter((s) => s.done).length;
