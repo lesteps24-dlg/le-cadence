@@ -89,7 +89,7 @@ const { useState, useEffect, useRef } = React;
     const SUPABASE_ANON  = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNsd2xuYnp4cmFpYXZwY2pidml5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQyMzg5NjksImV4cCI6MjA4OTgxNDk2OX0.-r80YRrZG2us0kQwFpo0IKbmYX45VsF8TFFnYPT3qsM";
     const TABLE         = "quick_log";
     const USER_KEY      = "linda";
-    const APP_VERSION   = "v7.69 · 2026-09-27";
+    const APP_VERSION   = "v7.71 · 2026-09-27";
     const TIME_ANALYZE_URL = "https://le-cadence-analyze.lesteps24.workers.dev/";
     const IDLE_GOAL_HRS = 1;   // target: no more than 1 hour of idle / TV per day
     const SESSION_TYPES = ["Study", "Class", "Quiz/Test", "Project", "Other"];
@@ -5347,7 +5347,7 @@ const { useState, useEffect, useRef } = React;
     const TABLE         = "hundred_days";
     const USER_KEY      = "linda";              // any fixed label; names your single saved row
     const ANALYZE_URL   = "https://hundred-days-analyze.lesteps24.workers.dev/";                   // your trends Worker
-    const APP_VERSION   = "v3.99 · 2026-09-27";  // bump this each update so you can confirm a deploy
+    const APP_VERSION   = "v3.101 · 2026-09-27";  // bump this each update so you can confirm a deploy
     const DEMO_URL      = "https://www.instagram.com/reel/DWACMUODNN1/";  // Movement routine demo
     /* ============================================================ */
 
@@ -6471,6 +6471,27 @@ const { useState, useEffect, useRef } = React;
         });
       }, [state && state.strava && state.strava.workouts, state && state.habits, state && state.completions]);
 
+      // v3.101 One-way catch-up for Whole-foods and Fasting from the nutrition log: a day planned in advance is ticked
+      // only once it is today (or past). Runs on load and whenever the log changes. Never auto-unchecks.
+      useEffect(() => {
+        if (!state || !state.habits || !state.completions) return;
+        const wholeId = (state.habits.find((h) => /whole\s*food/i.test(h.name || "")) || {}).id;
+        const fastId = (state.habits.find((h) => /fast/i.test(h.name || "")) || {}).id;
+        if (!wholeId && !fastId) return;
+        const t = todayStr(); const goal = (state.fastHabitGoalHrs || 12) * 60;
+        const minOf = (hhmm) => { if (!hhmm || String(hhmm).indexOf(":") < 0) return null; const [h, m] = String(hhmm).split(":").map(Number); return h * 60 + m; };
+        const flen = (r) => { const a = minOf(r.stoppedPrev), b = minOf(r.startedToday); if (a == null || b == null) return null; let d = (b + 1440) - a; if (d >= 1440) d -= 1440; return d; };
+        const toCheck = [];
+        Object.keys(state.nutritionLog || {}).forEach((day) => {
+          if (day > t) return;
+          const r = state.nutritionLog[day] || {}; const dc = state.completions[day] || {};
+          if (wholeId && !dc[wholeId] && r.bWhole && r.lWhole && r.dWhole && !r.sugar) toCheck.push([day, wholeId]);
+          const fl = flen(r); if (fastId && !dc[fastId] && fl != null && fl >= goal) toCheck.push([day, fastId]);
+        });
+        if (!toCheck.length) return;
+        setState((s) => { const completions = { ...s.completions }; toCheck.forEach(([day, id]) => { completions[day] = { ...(completions[day] || {}), [id]: true }; }); return { ...s, completions }; });
+      }, [state && state.nutritionLog, state && state.habits, state && state.completions, state && state.fastHabitGoalHrs]);
+
       // One-way auto-check for the Movement-breaks habit: when the Reset tab count reaches resetTarget for a day, tick it.
       useEffect(() => {
         if (!state || !state.habits || !state.completions) return;
@@ -6670,9 +6691,11 @@ const { useState, useEffect, useRef } = React;
         const ensure = (habitId) => { if (!habitId) return; const day = completions[dateStr] || {}; if (!day[habitId]) completions = { ...completions, [dateStr]: { ...day, [habitId]: true } }; };
         const wholeId = (s.habits.find((h) => /whole\s*food/i.test(h.name)) || {}).id;
         const fastId = (s.habits.find((h) => /fast/i.test(h.name)) || {}).id;
-        if (rec.bWhole && rec.lWhole && rec.dWhole && !rec.sugar) ensure(wholeId);   // sugar blocks the check at evaluation time
-        const fl = fastLen(rec);
-        if (fl != null && fl >= (s.fastHabitGoalHrs || 12) * 60) ensure(fastId);   // configurable: 12h now, switch to 16h when ready
+        if (dateStr <= todayStr()) {   // v3.101: a planned (future) day never ticks a habit — the catch-up effect below ticks it once the day arrives
+          if (rec.bWhole && rec.lWhole && rec.dWhole && !rec.sugar) ensure(wholeId);   // sugar blocks the check at evaluation time
+          const fl = fastLen(rec);
+          if (fl != null && fl >= (s.fastHabitGoalHrs || 12) * 60) ensure(fastId);   // configurable: 12h now, switch to 16h when ready
+        }
         return { ...s, nutritionLog, completions };
       });
       const minOfDay = (hhmm) => { if (!hhmm || hhmm.indexOf(":") < 0) return null; const [h, m] = hhmm.split(":").map(Number); return h * 60 + m; };
@@ -7577,10 +7600,10 @@ const { useState, useEffect, useRef } = React;
                   <h2 style={h2}>Nutrition &amp; Fasting</h2>
                   <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8 }}>
                     <button onClick={() => setNutDate(addDays(nutDate, -1))} aria-label="Previous day" style={{ background: "transparent", border: `1px solid ${C.line}`, borderRadius: 9, cursor: "pointer", fontSize: 16, lineHeight: 1, padding: "6px 10px", color: C.soft }}>‹</button>
-                    <input type="date" value={nutDate} max={todayStr()} onChange={(e) => setNutDate(e.target.value || todayStr())} style={{ ...nutInput, flex: 1, textAlign: "center" }} />
-                    <button onClick={() => setNutDate(addDays(nutDate, 1) > todayStr() ? todayStr() : addDays(nutDate, 1))} disabled={nutDate >= todayStr()} aria-label="Next day" style={{ background: "transparent", border: `1px solid ${C.line}`, borderRadius: 9, cursor: nutDate >= todayStr() ? "default" : "pointer", fontSize: 16, lineHeight: 1, padding: "6px 10px", color: nutDate >= todayStr() ? C.faint : C.soft }}>›</button>
+                    <input type="date" value={nutDate} max={addDays(todayStr(), 7)} onChange={(e) => setNutDate(e.target.value || todayStr())} style={{ ...nutInput, flex: 1, textAlign: "center" }} />
+                    <button onClick={() => setNutDate(addDays(nutDate, 1) > addDays(todayStr(), 7) ? addDays(todayStr(), 7) : addDays(nutDate, 1))} disabled={nutDate >= addDays(todayStr(), 7)} aria-label="Next day" style={{ background: "transparent", border: `1px solid ${C.line}`, borderRadius: 9, cursor: nutDate >= todayStr() ? "default" : "pointer", fontSize: 16, lineHeight: 1, padding: "6px 10px", color: nutDate >= todayStr() ? C.faint : C.soft }}>›</button>
                   </div>
-                  <p style={{ fontFamily: "'Hanken Grotesk', sans-serif", fontSize: 11.5, color: C.soft, margin: "6px 0 0" }}>{nutDate === todayStr() ? "Today" : prettyDate(nutDate)}{nutDate !== todayStr() ? <span onClick={() => setNutDate(todayStr())} style={{ color: C.navy, cursor: "pointer", marginLeft: 8 }}>→ back to today</span> : null}</p>
+                  <p style={{ fontFamily: "'Hanken Grotesk', sans-serif", fontSize: 11.5, color: C.soft, margin: "6px 0 0" }}>{nutDate === todayStr() ? "Today" : nutDate > todayStr() ? "Planned · " + prettyDate(nutDate) : prettyDate(nutDate)}{nutDate !== todayStr() ? <span onClick={() => setNutDate(todayStr())} style={{ color: C.navy, cursor: "pointer", marginLeft: 8 }}>→ back to today</span> : null}</p>
                 </div>
 
                 {/* v3.97 — copy-day: the thing that made MyFitnessPal stick. Copies meals, times, flags and snacks from

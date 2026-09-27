@@ -4,6 +4,12 @@ Shell version is `APP_VERSION` near the top of `index.html` (inside QuickLogApp)
 `APP_VERSION`: Health, Muse, Streaks (ConsistencyApp), Practice. Bump the shell on every deploy; bump an app's
 version only when that app changed.
 
+## v7.71 — 2026-09-27 (Health v3.101)
+- **Planned days never tick habits early.** Whole-foods and Fasting auto-checks now ignore future dates; a catch-up check runs on load and on every log change, so a day planned in advance is ticked the moment it becomes today (if its entries still meet the rule). Never auto-unchecks.
+
+## v7.70 — 2026-09-27 (Health v3.100)
+- **Nutrition accepts dates up to 7 days ahead** (was capped at today) so tomorrow's meals can be planned; the header reads "Planned · <date>". Copy-day and saved meals work on a planned day too. Note: the fasting and whole-food auto-checks run on whatever day you're editing, so a planned day will tick its habits in advance — the Today tab still judges each day by its own entries.
+
 ## v7.69 — 2026-09-27 (Today v1.11)
 - Three things: ceiling raised from five to **ten** (`THREE_MAX`). Same rule — a new line only appears once everything filled is ticked.
 
