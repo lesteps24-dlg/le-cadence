@@ -85,7 +85,7 @@ const { useState, useEffect, useRef } = React;
     const SUPABASE_ANON  = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNsd2xuYnp4cmFpYXZwY2pidml5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQyMzg5NjksImV4cCI6MjA4OTgxNDk2OX0.-r80YRrZG2us0kQwFpo0IKbmYX45VsF8TFFnYPT3qsM";
     const TABLE         = "quick_log";
     const USER_KEY      = "linda";
-    const APP_VERSION   = "v7.52 · 2026-09-27";
+    const APP_VERSION   = "v7.53 · 2026-09-27";
     const TIME_ANALYZE_URL = "https://le-cadence-analyze.lesteps24.workers.dev/";
     const IDLE_GOAL_HRS = 1;   // target: no more than 1 hour of idle / TV per day
     const SESSION_TYPES = ["Study", "Class", "Quiz/Test", "Project", "Other"];
@@ -5322,7 +5322,7 @@ const { useState, useEffect, useRef } = React;
     const TABLE         = "hundred_days";
     const USER_KEY      = "linda";              // any fixed label; names your single saved row
     const ANALYZE_URL   = "https://hundred-days-analyze.lesteps24.workers.dev/";                   // your trends Worker
-    const APP_VERSION   = "v3.96 · 2026-09-27";  // bump this each update so you can confirm a deploy
+    const APP_VERSION   = "v3.97 · 2026-09-27";  // bump this each update so you can confirm a deploy
     const DEMO_URL      = "https://www.instagram.com/reel/DWACMUODNN1/";  // Movement routine demo
     /* ============================================================ */
 
@@ -6052,6 +6052,7 @@ const { useState, useEffect, useRef } = React;
       const [editDate, setEditDate] = useState(null);
       const [showSettings, setShowSettings] = useState(false);
       const [nutDate, setNutDate] = useState(todayStr());
+      const [copyPick, setCopyPick] = useState("");   // v3.97 Nutrition "Copy from…" picker
       const [noteDraft, setNoteDraft] = useState({ worked: "", didnt: "", back: "" });
       const [editingNoteId, setEditingNoteId] = useState(null);
       const [showEarlierCps, setShowEarlierCps] = useState(false);
@@ -6471,6 +6472,54 @@ const { useState, useEffect, useRef } = React;
       const dayNum = Math.min(Math.max(daysBetween(state.startDate, today) + 1, 1), TOTAL);
 
       const dayCompletions = (dateStr) => state.completions[dateStr] || {};
+      /* v3.97 — provenance, derived at render time from the same signals the auto-checks read.
+         Nothing is stored: completions[day][id] stays a bare true, so this can never drift from the logic.
+         Returns a short label for a ticked habit ("Credited from 92 min study") or, for today only, a
+         "Waiting for sync" hint on an unticked habit whose source is automatic and has no data yet. */
+      const provenance = (day, h) => {
+        if (!h) return null;
+        const done = !!dayCompletions(day)[h.id];
+        const isToday = day === todayStr();
+        const id = h.id, name = h.name || "";
+        const fmtH = (x) => (x == null ? "" : (Math.round(x * 10) / 10) + " h");
+        if (/\bsleep\b/i.test(name)) {
+          const o = ((state.oura && state.oura.days) || []).find((d) => d.day === day);
+          const w = ((state.withings && state.withings.days) || []).find((d) => d.day === day);
+          const hrs = Math.max(o && o.sleepHours != null ? o.sleepHours : -1, w && w.sleepHours != null ? w.sleepHours : -1);
+          if (hrs >= 0) { const src = o && o.sleepHours != null && (!w || o.sleepHours >= (w.sleepHours || 0)) ? "Oura" : "Withings"; return done ? `From ${src} · ${fmtH(hrs)}` : `${src}: ${fmtH(hrs)} · outside target`; }
+          return isToday && !done ? "Waiting for sync" : (done ? "Manually checked" : null);
+        }
+        if (/\bsteps\b/i.test(name)) {
+          const ov = (state.stepsOverride || {})[day];
+          const w = ((state.withings && state.withings.days) || []).find((d) => d.day === day);
+          const n = ov != null ? ov : (w && w.steps != null ? w.steps : null);
+          const goal = stepsGoalFor(state.stepsRamp, day, state.stepsGoalPreRamp || state.stepsGoal || 10000);
+          if (n != null) return done ? `${ov != null ? "Entered" : "From Withings"} · ${n.toLocaleString()} of ${goal.toLocaleString()}` : `${n.toLocaleString()} of ${goal.toLocaleString()} so far`;
+          return isToday && !done ? "Waiting for sync" : (done ? "Manually checked" : null);
+        }
+        if (id === "h_morning") return (state.morningLog || {})[day] ? "Completed from Morning routine" : (done ? "Manually checked" : null);
+        if (id === "h_reset") { const n = (state.resetLog || {})[day] || 0; const t = state.resetTarget != null ? state.resetTarget : 4; return n >= t ? `Completed from Reset · ${n} of ${t}` : (done ? "Manually checked" : (n ? `${n} of ${t} breaks so far` : null)); }
+        if (id === "h5" || /\bread/i.test(name)) { const m = (studyDays || {})[day] || 0; return m >= 60 ? `Credited from ${m} min study` : (done ? "Manually checked" : (m ? `${m} min study so far (60 credits)` : null)); }
+        if (id === "h_breath") {
+          if ((museDays || {})[day]) return "Completed from Muse";
+          const ws = ((state.strava && state.strava.workouts) || []).filter((w) => w && w.day === day && !w.ignored && kindOfStrava(w) === "breath");
+          if (ws.length) return "Completed from Strava";
+          return done ? "Manually checked" : null;
+        }
+        if (id === "h4") {
+          const ws = ((state.strava && state.strava.workouts) || []).filter((w) => w && w.day === day && !w.ignored && kindOfStrava(w) === "resistance" && (Number(w.minutes) || 0) >= STRAVA_MAP.resistanceMin);
+          if (ws.length) return `Completed from Strava · ${ws.map((w) => w.name || w.type).join(", ").slice(0, 40)}`;
+          return done ? "Manually checked" : null;
+        }
+        if (id === "h_cardio") {
+          const cm = cardioMinsByDay((state.strava && state.strava.workouts) || [])[day] || 0;
+          if (cm >= STRAVA_MAP.cardioMin) return `Completed from Strava · ${cm} min`;
+          return done ? "Manually checked" : (cm ? `${cm} min from Strava so far (${STRAVA_MAP.cardioMin} counts)` : null);
+        }
+        if (/whole\s*food/i.test(name)) { const r = (state.nutritionLog || {})[day] || {}; return r.bWhole && r.lWhole && r.dWhole && !r.sugar ? "Completed from Nutrition log" : (done ? "Manually checked" : null); }
+        if (/fast/i.test(name)) { const r = (state.nutritionLog || {})[day] || {}; const fl = fastLen(r); const g = (state.fastHabitGoalHrs || 12) * 60; return fl != null && fl >= g ? `Completed from Nutrition log · ${fmtHM(fl)} fast` : (done ? "Manually checked" : (fl != null ? `${fmtHM(fl)} fast · ${state.fastHabitGoalHrs || 12} h counts` : null)); }
+        return done ? "Manually checked" : null;
+      };
       // Date-aware habit rules (keeps streak history honest):
       //  - a habit only gates a day if it existed on that day (h.addedOn <= day)
       //  - a habit is only "weekly" from the day it was made weekly (h.weeklySince <= day); before that it was daily
@@ -7195,7 +7244,10 @@ const { useState, useEffect, useRef } = React;
                     out.push(
                       <button key={h.id} onClick={() => toggle(habitDate, h.id)} style={checkRow(done)}>
                         <span style={box(done)}>{done ? "✓" : ""}</span>
-                        <span style={{ flex: 1, fontFamily: "'Hanken Grotesk', sans-serif", fontSize: 17, fontWeight: 600, color: done ? C.soft : C.ink, textDecoration: done ? "line-through" : "none", textDecorationColor: C.faint }}>{h.name}</span>
+                        <span style={{ flex: 1, display: "flex", flexDirection: "column", gap: 2, minWidth: 0 }}>
+                          <span style={{ fontFamily: "'Hanken Grotesk', sans-serif", fontSize: 17, fontWeight: 600, color: done ? C.soft : C.ink, textDecoration: done ? "line-through" : "none", textDecorationColor: C.faint }}>{h.name}</span>
+                          {(() => { const pv = provenance(habitDate, h); return pv ? <span style={{ fontFamily: "'DM Mono', monospace", fontSize: 10, letterSpacing: 0.3, color: pv === "Waiting for sync" ? "#A9822F" : (done ? C.sage : C.soft), textDecoration: "none" }}>{pv}</span> : null; })()}
+                        </span>
                         {wk != null && (
                           <span title={`${wk} of ${h.weekly} days this week (Mon–Sun)`} style={{ fontFamily: "'DM Mono', monospace", fontSize: 10.5, fontWeight: 500, padding: "3px 7px", borderRadius: 999, whiteSpace: "nowrap", border: "1px solid " + (wkMet ? C.sage : C.line), color: wkMet ? C.sage : C.soft, background: "transparent" }}>{wk}/{h.weekly} wk</span>
                         )}
@@ -7498,6 +7550,29 @@ const { useState, useEffect, useRef } = React;
                   </div>
                   <p style={{ fontFamily: "'Hanken Grotesk', sans-serif", fontSize: 11.5, color: C.soft, margin: "6px 0 0" }}>{nutDate === todayStr() ? "Today" : prettyDate(nutDate)}{nutDate !== todayStr() ? <span onClick={() => setNutDate(todayStr())} style={{ color: C.navy, cursor: "pointer", marginLeft: 8 }}>→ back to today</span> : null}</p>
                 </div>
+
+                {/* v3.97 — copy-day: the thing that made MyFitnessPal stick. Copies meals, times, flags and snacks from
+                    another day into this one; never touches stoppedPrev (that is derived from the previous night). */}
+                {(() => {
+                  const COPY_KEYS = ["breakfast", "lunch", "dinner", "bFood", "lFood", "dFood", "bWhole", "lWhole", "dWhole", "snacks", "sugar", "startedToday", "stoppedTonight"];
+                  const hasFood = (r) => !!(r && (r.bFood || r.lFood || r.dFood || r.breakfast || r.lunch || r.dinner));
+                  const log = state.nutritionLog || {};
+                  const yday = addDays(nutDate, -1);
+                  const copyFrom = (src) => { const r = log[src]; if (!r) return; const patch = {}; COPY_KEYS.forEach((k) => { if (r[k] !== undefined) patch[k] = r[k]; }); set(patch); window.__lcToast(`Copied ${src === yday ? "yesterday" : prettyDate(src)} into ${nutDate === todayStr() ? "today" : prettyDate(nutDate)}`); };
+                  const recent = Object.keys(log).filter((d) => d < nutDate && hasFood(log[d])).sort().reverse().slice(0, 14);
+                  const [pick, setPick] = [copyPick, setCopyPick];
+                  const alreadyHasFood = hasFood(rec);
+                  return (
+                    <div style={{ display: "flex", gap: 6, marginBottom: 12, flexWrap: "wrap", alignItems: "center" }}>
+                      <button disabled={!hasFood(log[yday])} onClick={() => copyFrom(yday)} title={hasFood(log[yday]) ? "Copy yesterday's meals into this day" : "Nothing logged yesterday"} style={{ ...ghostMini, padding: "8px 12px", opacity: hasFood(log[yday]) ? 1 : 0.45 }}>↧ Same as yesterday</button>
+                      <select value={pick} onChange={(e) => { const v = e.target.value; setPick(""); if (v) copyFrom(v); }} disabled={!recent.length} style={{ ...ghostMini, padding: "8px 10px", background: C.paper, opacity: recent.length ? 1 : 0.45 }}>
+                        <option value="">Copy from…</option>
+                        {recent.map((d) => <option key={d} value={d}>{prettyDate(d)}{log[d].bFood ? " · " + String(log[d].bFood).slice(0, 18) : ""}</option>)}
+                      </select>
+                      {alreadyHasFood ? <span style={{ fontFamily: "'DM Mono', monospace", fontSize: 9.5, color: C.faint }}>copy overwrites what's here</span> : null}
+                    </div>
+                  );
+                })()}
 
                 <div style={{ ...card, marginBottom: 12 }}>
                   <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>

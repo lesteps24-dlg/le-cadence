@@ -4,6 +4,21 @@ Shell version is `APP_VERSION` near the top of `index.html` (inside QuickLogApp)
 `APP_VERSION`: Health, Muse, Streaks (ConsistencyApp), Practice. Bump the shell on every deploy; bump an app's
 version only when that app changed.
 
+## v7.53 — 2026-09-27 (Health v3.97)
+
+- **Provenance labels on habits.** Every habit row on Health → Today now says *why* it's ticked, derived at
+  render time from the same signals the auto-checks read — nothing new is stored, so the label can't drift:
+  `From Withings · 7.2 h` · `From Withings · 11,200 of 6,500` · `Completed from Strava · 35 min` ·
+  `Credited from 92 min study` · `Completed from Muse` · `Completed from Nutrition log · 13h 10m fast` ·
+  `Manually checked`. Unticked habits show progress toward the auto-check where there is any
+  (`45 min study so far (60 credits)`), and sleep/steps show `Waiting for sync` on today until data lands.
+- **Nutrition copy-day.** Two controls above the meal card: **↧ Same as yesterday** and **Copy from…** (last
+  14 logged days). Copies meals, times, whole-food flags, snacks and sugar into the selected day; never
+  touches `stoppedPrev` (derived from the previous night). The whole-food / fasting auto-checks fire on the
+  copy exactly as on a manual entry. Saved meals ("usual breakfast") are the next step if this proves useful.
+
+No schema change. Nothing removed, nothing renamed.
+
 ## v7.52 — 2026-09-27 (Health v3.96)
 
 - **New Study goal: Excel Functions Challenge** (Full Stack Modeller). Its own tab beside PMP / AMP /
