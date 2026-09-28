@@ -4,6 +4,11 @@ Shell version is `APP_VERSION` near the top of `index.html` (inside QuickLogApp)
 `APP_VERSION`: Health, Muse, Streaks (ConsistencyApp), Practice. Bump the shell on every deploy; bump an app's
 version only when that app changed.
 
+## v7.73 — 2026-09-27 (Today v1.12)
+- **This week card on Today** — the three weekly numbers, Mon–Sun, all derived: **Lifts** done of 3 (days with Resistance ticked in Health, which Strava strength classes tick automatically), **Cardio minutes** (Strava cardio workouts summed per day; Oura's auto-detected workouts are deliberately excluded because they include the daily walk), and **Weight · 7-day average** with the change vs the previous 7-day average (needs 3 weigh-ins in each window before it shows a trend).
+- Cardio target is off until **Oct 12** ("build phase — comfortable durations"); from then the card shows minutes of 150, with 300 named as the longer-range band. Constants `LIFT_GOAL`, `CARDIO_GOAL`, `CARDIO_STRETCH`, `CARDIO_TARGET_FROM` at the top of TodayApp.
+- **Gym machines not on Strava:** a minutes box on the card records today's cardio minutes to `today_state.wo[date].cardio`. A day's cardio is max(Strava, typed) — never both — and 30+ typed minutes satisfies the Cardio step on Today like a Strava ride would. It does not tick the Health habit.
+
 ## v7.72 — 2026-09-27 (Health v3.102)
 - Saved meals: **✎ edit** on each chip — rename, change the food text, flip the whole-food flag. Applying it afterwards uses the new values; days already logged are unchanged.
 

@@ -89,7 +89,7 @@ const { useState, useEffect, useRef } = React;
     const SUPABASE_ANON  = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNsd2xuYnp4cmFpYXZwY2pidml5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQyMzg5NjksImV4cCI6MjA4OTgxNDk2OX0.-r80YRrZG2us0kQwFpo0IKbmYX45VsF8TFFnYPT3qsM";
     const TABLE         = "quick_log";
     const USER_KEY      = "linda";
-    const APP_VERSION   = "v7.72 · 2026-09-27";
+    const APP_VERSION   = "v7.73 · 2026-09-27";
     const TIME_ANALYZE_URL = "https://le-cadence-analyze.lesteps24.workers.dev/";
     const IDLE_GOAL_HRS = 1;   // target: no more than 1 hour of idle / TV per day
     const SESSION_TYPES = ["Study", "Class", "Quiz/Test", "Project", "Other"];
@@ -13537,10 +13537,20 @@ const PracticeApp = (function () {
 const TodayApp = (function () {
   const { useState, useEffect, useRef } = React;
   const sb = (typeof window !== "undefined" && window.__SB) ? window.__SB : null;
-  const APP_VERSION = "v1.11 · 2026-09-27";
+  const APP_VERSION = "v1.12 · 2026-09-27";
   const RUN_FROM = "2026-09-28";        // the run counts from this day — Linda's reset for Sept 28
   const STUDY_TARGET_MIN = 120;         // 2 h/day is the bar; 3 h is the stretch shown in the detail
   const STUDY_STRETCH_MIN = 180;
+  // v1.12 — the three weekly numbers: lifts of 3, cardio minutes, weight trend. Weeks run Mon–Sun.
+  const LIFT_GOAL = 3;
+  const CARDIO_GOAL = 150, CARDIO_STRETCH = 300;   // min/week; the first milestone and the longer-range band
+  const CARDIO_TARGET_FROM = "2026-10-12";         // first two weeks from Sept 28 are "comfortable durations" — minutes shown, no target
+  const CARDIO_DAY_MIN = 30;                        // same bar as Health's STRAVA_MAP.cardioMin
+  // Strava classification, kept in step with Health's STRAVA_MAP (edit both if you change one)
+  const STRAVA_RESIST_TYPES = ["WeightTraining", "Crossfit", "Pilates"], STRAVA_BREATH_TYPES = ["Yoga"];
+  const STRAVA_RESIST_NAME = /strength|weights?|dumbbell|kettlebell|barre|core|arms|glutes|legs|upper body|lower body|full body|total body|bodyweight/i;
+  const STRAVA_CARDIO_TYPES = ["Ride", "VirtualRide", "EBikeRide", "GravelRide", "MountainBikeRide", "Run", "VirtualRun", "TrailRun", "Walk", "Hike", "Elliptical", "Rowing", "VirtualRow", "StairStepper", "Swim", "HighIntensityIntervalTraining", "Workout"];
+  const isStravaCardio = (w) => { if (!w || w.ignored) return false; const t = String(w.type || ""), nm = String(w.name || ""); if (/meditat|breath/i.test(nm) || STRAVA_BREATH_TYPES.includes(t)) return false; if (STRAVA_RESIST_TYPES.includes(t) || (t === "Workout" && STRAVA_RESIST_NAME.test(nm))) return false; return STRAVA_CARDIO_TYPES.includes(t); };
   // Links shown under the header. Add a line per link: [label, url].
   const TODAY_LINKS = [
     ["Inspiration · week by week (OneNote)", "https://onedrive.live.com/view.aspx?resid=FAE135EBEA974E3%21sf33f54ab1b7c4563afe6555df607bca9&id=documents&wd=target%28Health.one%7C4D9AC4E4-BA49-41B6-85A1-36C09449A12E%2FInspiration%7C2C8C932F-E0E8-421A-88A3-F1839A62CD13%2F%29&wdpartid=%7b4BE50D95-FC6C-402B-BF72-D09A20CFB50C%7d%7b1%7d&wdsectionfileid=FAE135EBEA974E3!s31c4a313d4784764848a27779fdb2b94&end"],
@@ -13557,7 +13567,7 @@ const TodayApp = (function () {
   const visited = (ds, tab) => !!((visits()[ds] || {})[tab]);
 
   /* ---- derive the day's facts from the two rows ---- */
-  function facts(ds, hd, ql, mu) {
+  function facts(ds, hd, ql, mu, wo) {
     hd = hd || {}; ql = ql || {}; mu = mu || {}; const st = ql.study || {};
     const w = ((hd.withings && hd.withings.days) || []).find((d) => d.day === ds) || null;
     const water = ((hd.waterLog || {})[ds] || []);
@@ -13608,7 +13618,9 @@ const TodayApp = (function () {
     const stepsOv = (hd.stepsOverride || {})[ds];
     const stepsN = stepsOv != null ? stepsOv : (w && w.steps != null ? w.steps : null);
     const stravaToday = ((hd.strava && hd.strava.workouts) || []).filter((x) => x && x.day === ds && !x.ignored);
-    const liftDone = !!comp.h4, cardioDone = !!comp.h_cardio;
+    // v1.12 — minutes typed on the Today week card (gym machines not on Strava) count like a Strava cardio day
+    const manualCardio = Number((((wo || {})[ds]) || {}).cardio) || 0;
+    const liftDone = !!comp.h4, cardioDone = !!comp.h_cardio || manualCardio >= CARDIO_DAY_MIN;
     const stravaNames = stravaToday.map((x) => x.name || x.type).filter(Boolean).join(", ").slice(0, 40);
     const museToday = ((mu.sessions || []).some((x) => x && x.date === ds));
     // periodic: last trends analysis (Health → Insights) and last lab draw
@@ -13618,7 +13630,7 @@ const TodayApp = (function () {
     // v1.3: Withings days carry weightLb / weightKg (not "weight") — this is why the Sept 27 weigh-in never ticked
     const wU = (hd.weightUnit || "lb") === "kg" ? "kg" : "lb";
     const wVal = !w ? null : wU === "kg" ? (w.weightKg != null ? w.weightKg : (w.weightLb != null ? Math.round(w.weightLb / 2.20462 * 10) / 10 : null)) : (w.weightLb != null ? w.weightLb : (w.weightKg != null ? Math.round(w.weightKg * 2.20462 * 10) / 10 : null));
-    return { morningDone, bp, stepsGoal, stepsN, stepsOv: stepsOv != null, liftDone, cardioDone, stravaNames, museToday, lastTrends, lastLab, lastScan,
+    return { morningDone, bp, stepsGoal, stepsN, stepsOv: stepsOv != null, liftDone, cardioDone, manualCardio, cardioByHabit: !!comp.h_cardio, stravaNames, museToday, lastTrends, lastLab, lastScan,
       wholeDone, wholeAll, wholeN, sugar: !!nut.sugar, fastDone, fastMin, fastGoal, invHrs, invGoal, invAny: !!inv, suppN, suppTotal: supps.length, noonN, noonTotal: noonSet.length, nightN, nightTotal: nightSet.length, noonNames: names(noonSet), nightNames: names(nightSet), waterGoal, weight: wVal, steps: w && w.steps != null ? w.steps : null, waterOz, waterN: water.length,
       lunch: !!(nut.lunch || nut.lFood), lunchTxt: nut.lFood || nut.lunch || "", dinner: !!(nut.dinner || nut.dFood), dinnerTxt: nut.dFood || nut.dinner || "",
       stopped: nut.stoppedTonight || "", studyMin, subjects, errs, qsets: qsets.length, drilled, plan, nextWeekPlanned, weightUnit: wU };
@@ -13650,7 +13662,7 @@ const TodayApp = (function () {
     const needLift = f.plan === "lift" || f.plan === "both", needCardio = f.plan === "cardio" || f.plan === "both";
     const woDone = f.plan === "rest" ? true : (!needLift || f.liftDone) && (!needCardio || f.cardioDone);
     const woLabel = f.plan === "rest" ? "Rest day — plan followed" : f.plan === "both" ? "Lift + cardio (both on the plan)" : f.plan === "lift" ? "Lift weights (on the plan today)" : "Cardio (on the plan today)";
-    const woDetail = f.plan === "rest" ? "no workout scheduled" : woDone ? (f.stravaNames ? `Completed from Strava · ${f.stravaNames}` : "checked in Health") : (f.stravaNames ? `Strava: ${f.stravaNames} (not the planned type)` : "Peloton → Strava ticks it, or check the habit in Health");
+    const woDetail = f.plan === "rest" ? "no workout scheduled" : woDone ? (needCardio && !f.cardioByHabit && f.manualCardio >= CARDIO_DAY_MIN ? `${f.manualCardio} min typed on This week` : f.stravaNames ? `Completed from Strava · ${f.stravaNames}` : "checked in Health") : (f.stravaNames ? `Strava: ${f.stravaNames} (not the planned type)` : "Peloton → Strava ticks it, type gym minutes in This week, or check the habit in Health");
     S.push({ block: "Evening", id: "workout", label: woLabel, core: true, done: woDone, detail: woDetail, go: ["health", "today"] });
     const sh = Math.round(f.studyMin / 60 * 10) / 10;
     S.push({ block: "Evening", id: "timer", label: `Study ${STUDY_TARGET_MIN / 60} h on the timer (stretch ${STUDY_STRETCH_MIN / 60} h)`, core: true, done: f.studyMin >= STUDY_TARGET_MIN, detail: f.studyMin ? `${f.studyMin} of ${STUDY_TARGET_MIN} min${f.studyMin >= STUDY_STRETCH_MIN ? " · stretch hit" : f.studyMin >= STUDY_TARGET_MIN ? ` · ${STUDY_STRETCH_MIN - f.studyMin} to stretch` : ""}${f.subjects.length ? " · " + f.subjects.join(", ") : ""}` : "", go: ["study", "dash"] });
@@ -13682,11 +13694,28 @@ const TodayApp = (function () {
     return S;
   }
 
+  /* v1.12 — this week's three numbers, all derived. Cardio minutes per day = max(Strava cardio total, minutes typed on Today);
+     Oura's auto-detected workouts are NOT used because they include the daily walk, which has its own step. */
+  function weekStats(ds, hd, wo) {
+    hd = hd || {}; wo = wo || {};
+    const mon = addDays(ds, -((dowOf(ds) + 6) % 7)); const days = Array.from({ length: 7 }, (_, i) => addDays(mon, i));
+    const comp = hd.completions || {}; const strava = (hd.strava && hd.strava.workouts) || [];
+    const lifts = days.filter((d) => d <= ds && (comp[d] || {}).h4).length;
+    const cardioOf = (d) => Math.max(strava.filter((w) => w && w.day === d && isStravaCardio(w)).reduce((a, w) => a + (Number(w.minutes) || 0), 0), Number((wo[d] || {}).cardio) || 0);
+    const perDay = days.map((d) => ({ d, min: d <= ds ? cardioOf(d) : 0 }));
+    const cardio = perDay.reduce((a, x) => a + x.min, 0);
+    const wU = (hd.weightUnit || "lb") === "kg" ? "kg" : "lb";
+    const wd = ((hd.withings && hd.withings.days) || []).filter((x) => x && x.day && x.weightLb != null);
+    const avg = (from, to) => { const xs = wd.filter((x) => x.day >= from && x.day <= to).map((x) => wU === "kg" ? x.weightLb / 2.20462 : x.weightLb); return xs.length ? { n: xs.length, v: xs.reduce((a, b) => a + b, 0) / xs.length } : null; };
+    const cur = avg(addDays(ds, -6), ds), prev = avg(addDays(ds, -13), addDays(ds, -7));
+    return { mon, sun: addDays(mon, 6), lifts, cardio, perDay, cur, prev, wU, targetOn: ds >= CARDIO_TARGET_FROM };
+  }
+
   /* the run: consecutive days (ending today or yesterday) where every core step was met — derived, never stored */
   const TODAY_TABLE = "today_state";   // own row; skips live here (SQL in CHANGELOG v7.62). Falls back to this browser if the table is missing.
-  function runLength(hd, ql, mu, skips) {
+  function runLength(hd, ql, mu, skips, wo) {
     const t = todayStr();
-    const coreOk = (ds) => steps(ds, facts(ds, hd, ql, mu), (skips || {})[ds]).filter((s) => s.core).every((s) => s.done);
+    const coreOk = (ds) => steps(ds, facts(ds, hd, ql, mu, wo), (skips || {})[ds]).filter((s) => s.core).every((s) => s.done);
     let n = 0, cur = coreOk(t) ? t : addDays(t, -1);
     if (cur < RUN_FROM || !coreOk(cur)) return 0;
     while (cur >= RUN_FROM && coreOk(cur) && n < 400) { n++; cur = addDays(cur, -1); }
@@ -13727,6 +13756,8 @@ const TodayApp = (function () {
     const threeFor = (ds) => { const t = ((tstate || {}).three || {})[ds] || []; const n = Math.max(3, Math.min(THREE_MAX, t.length)); return Array.from({ length: n }, (_, i) => t[i] || { t: "", d: false }); };
     const setThree = (ds, list) => { const cur = tstate || {}; const next = { ...cur, three: { ...(cur.three || {}), [ds]: list } }; Object.keys(next.three).sort().slice(0, -60).forEach((old) => delete next.three[old]); return saveT(next); };
     const threeDraft = useRef({});   // uncommitted text per index while typing
+    /* v1.12 — cardio minutes typed for a day (gym treadmill / bike / rower not on Strava). today_state.wo[date].cardio */
+    const setCardioMin = (ds, min) => { const cur = tstate || {}; const wo = { ...(cur.wo || {}) }; if (min > 0) wo[ds] = { ...(wo[ds] || {}), cardio: min }; else if (wo[ds]) { delete wo[ds].cardio; if (!Object.keys(wo[ds]).length) delete wo[ds]; } Object.keys(wo).sort().slice(0, -60).forEach((old) => delete wo[old]); return saveT({ ...cur, wo }, min > 0 ? `${min} cardio min logged` : "Cardio minutes cleared"); };
     const [signedIn, setSignedIn] = useState(true);
     const [histOpen, setHistOpen] = useState(false);
     useEffect(() => { if (!sb) return; sb.auth.getSession().then(({ data }) => setSignedIn(!!(data && data.session))).catch(() => {}); const { data: sub } = sb.auth.onAuthStateChange((_e, sess) => { setSignedIn(!!sess); if (sess) load(); }); return () => { try { sub.subscription.unsubscribe(); } catch (e) {} }; }, []);
@@ -13771,13 +13802,15 @@ const TodayApp = (function () {
 
     const ds = todayStr();
     const skips = (tstate && tstate.skips) || {};
-    const f = facts(ds, hd, ql, mu);
+    const wo = (tstate && tstate.wo) || {};
+    const f = facts(ds, hd, ql, mu, wo);
     const S = steps(ds, f, skips[ds]);
     const doneAll = S.filter((s) => s.done).length;
     const leftReq = S.filter((s) => !s.done && !s.optional).length;
     const leftOpt = S.filter((s) => !s.done && s.optional).length;
     const coreLeft = S.filter((s) => s.core && !s.done);
-    const run = runLength(hd, ql, mu, skips);
+    const run = runLength(hd, ql, mu, skips, wo);
+    const wk = weekStats(ds, hd, wo);
     const next = S.find((s) => !s.done && !s.optional) || S.find((s) => !s.done);
     const ORDER = ["Morning", "Noon", "Afternoon", "Evening", "Sunday", "Periodic"];
     const blocks = ORDER.filter((b) => S.some((s) => s.block === b));
@@ -13812,6 +13845,53 @@ const TodayApp = (function () {
             <span style={{ fontFamily: mono, fontSize: 12, color: C.soft }}>→</span>
           </button>
         )}
+
+        {/* v1.12 — this week: lifts of 3 · cardio minutes · weight trend. Read-only except the cardio-minutes box. */}
+        {(() => {
+          const fmtW = (v) => (Math.round(v * 10) / 10).toFixed(1);
+          const liftOk = wk.lifts >= LIFT_GOAL, cardioOk = wk.targetOn && wk.cardio >= CARDIO_GOAL;
+          const trend = wk.cur && wk.prev && wk.cur.n >= 3 && wk.prev.n >= 3 ? wk.cur.v - wk.prev.v : null;
+          const trendTxt = trend == null ? (wk.cur ? `${wk.cur.n} weigh-in${wk.cur.n === 1 ? "" : "s"} this week · trend needs 3 in each of two weeks` : "no weigh-ins in the last 7 days")
+            : `${trend > 0 ? "+" : trend < 0 ? "−" : ""}${fmtW(Math.abs(trend))} ${wk.wU} vs the week before`;
+          const daysLeft = Math.max(0, (6 - ((dowOf(ds) + 6) % 7)));
+          const cardioTxt = !wk.targetOn ? `build phase · comfortable durations, no minute target until ${CARDIO_TARGET_FROM.slice(5).replace("-", "/")}`
+            : wk.cardio >= CARDIO_STRETCH ? `past the ${CARDIO_STRETCH} long-range mark` : wk.cardio >= CARDIO_GOAL ? `milestone hit · ${CARDIO_STRETCH} is the longer-range band` : `${CARDIO_GOAL - wk.cardio} to go${daysLeft ? ` · ${daysLeft} day${daysLeft === 1 ? "" : "s"} left` : " · week ends today"}`;
+          const todayMin = Number((wo[ds] || {}).cardio) || 0;
+          const stravaToday = wk.perDay.find((x) => x.d === ds); const stravaMin = stravaToday ? stravaToday.min : 0;
+          const Num = ({ v, ok, unit }) => <span style={{ fontFamily: serif, fontSize: 24, lineHeight: 1, color: ok ? C.sage : C.ink }}>{v}<span style={{ fontFamily: mono, fontSize: 10.5, color: C.soft, marginLeft: 4 }}>{unit}</span></span>;
+          return (
+            <div style={card}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 8 }}>
+                <span style={{ fontFamily: mono, fontSize: 10, letterSpacing: 1.2, textTransform: "uppercase", color: C.ink, fontWeight: 700 }}>This week</span>
+                <span style={{ fontFamily: mono, fontSize: 10, color: C.faint }}>Mon {wk.mon.slice(5).replace("-", "/")} – Sun {wk.sun.slice(5).replace("-", "/")}</span>
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
+                <button onClick={() => go(["health", "today"])} style={{ textAlign: "left", background: "transparent", border: "none", padding: 0, cursor: "pointer", fontFamily: font }}>
+                  <div style={{ fontFamily: mono, fontSize: 9.5, letterSpacing: 1, textTransform: "uppercase", color: C.soft, marginBottom: 4 }}>Lifts</div>
+                  <Num v={wk.lifts} ok={liftOk} unit={`of ${LIFT_GOAL}`} />
+                  <div style={{ fontFamily: mono, fontSize: 9.5, color: liftOk ? C.sage : C.soft, marginTop: 4 }}>{liftOk ? "done for the week" : "Resistance ticks in Health"}</div>
+                </button>
+                <button onClick={() => go(["health", "today"])} style={{ textAlign: "left", background: "transparent", border: "none", padding: 0, cursor: "pointer", fontFamily: font }}>
+                  <div style={{ fontFamily: mono, fontSize: 9.5, letterSpacing: 1, textTransform: "uppercase", color: C.soft, marginBottom: 4 }}>Cardio</div>
+                  <Num v={wk.cardio} ok={cardioOk} unit={wk.targetOn ? `of ${CARDIO_GOAL} min` : "min"} />
+                  <div style={{ fontFamily: mono, fontSize: 9.5, color: cardioOk ? C.sage : C.soft, marginTop: 4 }}>{cardioTxt}</div>
+                </button>
+                <button onClick={() => go(["health", "withings"])} style={{ textAlign: "left", background: "transparent", border: "none", padding: 0, cursor: "pointer", fontFamily: font }}>
+                  <div style={{ fontFamily: mono, fontSize: 9.5, letterSpacing: 1, textTransform: "uppercase", color: C.soft, marginBottom: 4 }}>Weight · 7-day avg</div>
+                  {wk.cur ? <Num v={fmtW(wk.cur.v)} ok={trend != null && trend < 0} unit={wk.wU} /> : <span style={{ fontFamily: serif, fontSize: 24, lineHeight: 1, color: C.faint }}>—</span>}
+                  <div style={{ fontFamily: mono, fontSize: 9.5, color: trend != null && trend < 0 ? C.sage : C.soft, marginTop: 4 }}>{trendTxt}</div>
+                </button>
+              </div>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, borderTop: `1px solid ${C.bg}`, marginTop: 10, paddingTop: 8, fontFamily: mono, fontSize: 10, color: C.soft }}>
+                <span style={{ flex: 1 }}>{stravaMin > todayMin ? `today: ${stravaMin} min from Strava` : "Gym machine not on Strava? Today's cardio minutes:"}</span>
+                <input type="number" min="0" step="5" inputMode="numeric" defaultValue={todayMin || ""} key={ds + "-" + todayMin} placeholder="min"
+                  onBlur={(e) => { const v = Math.max(0, Math.round(Number(e.target.value) || 0)); if (v !== todayMin) setCardioMin(ds, v); }}
+                  onKeyDown={(e) => { if (e.key === "Enter") e.target.blur(); }}
+                  style={{ width: 58, border: `1px solid ${C.line}`, borderRadius: 7, background: "transparent", fontFamily: mono, fontSize: 12, color: C.ink, padding: "4px 6px", textAlign: "right", outline: "none" }} />
+              </div>
+            </div>
+          );
+        })()}
 
         {(() => {
           const three0 = threeFor(ds);
@@ -13878,7 +13958,7 @@ const TodayApp = (function () {
           for (let i = 1; i <= 30; i++) {
             const d = addDays(ds, -i); if (d < floor) break;
             const list = (three[d] || []).filter((x) => x && x.t && x.t.trim());
-            const core = steps(d, facts(d, hd, ql, mu), skips[d]).filter((s) => s.core);
+            const core = steps(d, facts(d, hd, ql, mu, wo), skips[d]).filter((s) => s.core);
             const met = core.filter((s) => s.done).length;
             rows.push({ d, list, met, total: core.length });
           }
