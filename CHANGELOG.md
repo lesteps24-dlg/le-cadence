@@ -4,6 +4,9 @@ Shell version is `APP_VERSION` near the top of `index.html` (inside QuickLogApp)
 `APP_VERSION`: Health, Muse, Streaks (ConsistencyApp), Practice. Bump the shell on every deploy; bump an app's
 version only when that app changed.
 
+## v7.74 — 2026-09-27
+- **Study → Log: edit a logged block.** ✎ on any block in the day list (and in History) opens an inline form — subject, start time, length (hr/min), type, note — then Save rewrites it in place. The day stays the same; the mirrored entry in the Time log moves with it. History's old type/note-only editor is replaced by the same form.
+
 ## v7.73 — 2026-09-27 (Today v1.12)
 - **This week card on Today** — the three weekly numbers, Mon–Sun, all derived: **Lifts** done of 3 (days with Resistance ticked in Health, which Strava strength classes tick automatically), **Cardio minutes** (Strava cardio workouts summed per day; Oura's auto-detected workouts are deliberately excluded because they include the daily walk), and **Weight · 7-day average** with the change vs the previous 7-day average (needs 3 weigh-ins in each window before it shows a trend).
 - Cardio target is off until **Oct 12** ("build phase — comfortable durations"); from then the card shows minutes of 150, with 300 named as the longer-range band. Constants `LIFT_GOAL`, `CARDIO_GOAL`, `CARDIO_STRETCH`, `CARDIO_TARGET_FROM` at the top of TodayApp.

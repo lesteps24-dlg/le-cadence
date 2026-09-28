@@ -89,7 +89,7 @@ const { useState, useEffect, useRef } = React;
     const SUPABASE_ANON  = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNsd2xuYnp4cmFpYXZwY2pidml5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQyMzg5NjksImV4cCI6MjA4OTgxNDk2OX0.-r80YRrZG2us0kQwFpo0IKbmYX45VsF8TFFnYPT3qsM";
     const TABLE         = "quick_log";
     const USER_KEY      = "linda";
-    const APP_VERSION   = "v7.73 · 2026-09-27";
+    const APP_VERSION   = "v7.74 · 2026-09-27";
     const TIME_ANALYZE_URL = "https://le-cadence-analyze.lesteps24.workers.dev/";
     const IDLE_GOAL_HRS = 1;   // target: no more than 1 hour of idle / TV per day
     const SESSION_TYPES = ["Study", "Class", "Quiz/Test", "Project", "Other"];
@@ -763,6 +763,7 @@ const { useState, useEffect, useRef } = React;
       const [schedOffset, setSchedOffset] = useState(0);
       const [histSubj, setHistSubj] = useState("");
       const [esId, setEsId] = useState(null);
+      const [esDraft, setEsDraft] = useState(null);   // v7.74 — edit form for a logged study block
       const [snSubj, setSnSubj] = useState("");
       const [snDate, setSnDate] = useState(todayStr());
       const [snText, setSnText] = useState("");
@@ -964,6 +965,17 @@ const { useState, useEffect, useRef } = React;
         return true;
       };
       const editStudySession = (id, patch) => setState((s) => ({ ...s, study: { ...s.study, sessions: (s.study.sessions || []).map((x) => x.id === id ? { ...x, ...patch } : x) } }));
+      // v7.74 — full edit of a logged block: subject, start time, length, type, note. Keeps the day; the mirrored Time-log entry follows.
+      const saveStudySessionEdit = (id, f) => { let ok = false; setState((s) => {
+        const old = (s.study.sessions || []).find((x) => x.id === id); if (!old) return s;
+        const mins = Math.round((parseInt(f.hr) || 0) * 60 + (parseFloat(f.min) || 0)); if (!(mins > 0)) return s;
+        const date = dateKey(new Date(old.start)); const at = f.startStr ? atTime(date, f.startStr) : null;
+        const start = at != null ? at : old.start, end = start + mins * 60000;
+        const nx = { ...old, subjectId: f.subjectId || old.subjectId, start, end, secs: mins * 60, type: f.type || old.type || "Study", note: f.note || "" };
+        let log = s.log; const cid = studyCatId();
+        if (cid && log && log[date] && Array.isArray(log[date].sessions)) { const day = { ...log[date] }; day.sessions = day.sessions.map((e) => (e.cat === cid && e.start === old.start && e.end === old.end) ? { ...e, start, end, note: "Study · " + studySubjName(nx.subjectId) } : e); log = { ...log, [date]: day }; }
+        ok = true; return { ...s, study: { ...s.study, sessions: (s.study.sessions || []).map((x) => x.id === id ? nx : x) }, log };
+      }); return ok; };
       // --- study analytics helpers (sessions store ms timestamps; hours derive from secs) ---
       const sessDate = (ss) => dateKey(new Date(ss.start));
       const sessHrs = (ss) => (ss.secs || 0) / 3600;
@@ -2972,6 +2984,28 @@ const { useState, useEffect, useRef } = React;
           {view === "study" && (() => {
             const subjects = state.study.subjects || [];
             const run = state.study.running;
+            // v7.74 — ✎ on a logged block opens this; Save rewrites the block in place
+            const hhmm = (ms) => { const d = new Date(ms); return String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0"); };
+            const openEdit = (ss) => { if (esId === ss.id) { setEsId(null); setEsDraft(null); return; } const m = Math.round((ss.secs || 0) / 60); setEsId(ss.id); setEsDraft({ subjectId: ss.subjectId, startStr: hhmm(ss.start), hr: String(Math.floor(m / 60)), min: String(m % 60), type: ss.type || "Study", note: ss.note || "" }); };
+            const sessEditor = (ss) => { if (esId !== ss.id || !esDraft) return null; const d = esDraft, up = (k, v) => setEsDraft({ ...d, [k]: v }); const mins = (parseInt(d.hr) || 0) * 60 + (parseFloat(d.min) || 0); return (
+              <div style={{ margin: "6px 0 4px 30px", padding: 10, border: `1px solid ${C.line}`, borderRadius: 10, background: C.bg }}>
+                <div style={{ display: "flex", gap: 6, marginBottom: 6 }}>
+                  <select value={d.subjectId} onChange={(e) => up("subjectId", e.target.value)} style={{ ...input, marginBottom: 0, flex: 2 }}>{subjects.map((su) => <option key={su.id} value={su.id}>{su.emoji} {su.name}</option>)}</select>
+                  <select value={d.type} onChange={(e) => up("type", e.target.value)} style={{ ...input, marginBottom: 0, flex: 1 }}>{SESSION_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}</select>
+                </div>
+                <div style={{ display: "flex", gap: 6, marginBottom: 6, alignItems: "center" }}>
+                  <input type="time" value={d.startStr} onChange={(e) => up("startStr", e.target.value)} style={{ ...input, marginBottom: 0, flex: 1 }} />
+                  <input type="number" min="0" inputMode="numeric" value={d.hr} onChange={(e) => up("hr", e.target.value)} placeholder="hr" style={{ ...input, marginBottom: 0, width: 54, textAlign: "right" }} />
+                  <input type="number" min="0" step="5" inputMode="numeric" value={d.min} onChange={(e) => up("min", e.target.value)} placeholder="min" style={{ ...input, marginBottom: 0, width: 62, textAlign: "right" }} />
+                </div>
+                <input value={d.note} onChange={(e) => up("note", e.target.value)} placeholder="note (optional)" style={{ ...input, marginBottom: 8 }} />
+                <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                  <button onClick={() => { if (saveStudySessionEdit(ss.id, d)) { setToast("Study block updated ✓"); setEsId(null); setEsDraft(null); } else setToast("Length must be more than 0"); }} style={{ ...startBtnStyle(true), width: "auto", padding: "7px 14px" }}>Save</button>
+                  <button onClick={() => { setEsId(null); setEsDraft(null); }} style={{ ...ghostMini, color: C.soft }}>cancel</button>
+                  <span style={{ marginLeft: "auto", fontFamily: "'DM Mono', monospace", fontSize: 10.5, color: C.soft }}>{mins > 0 ? "= " + fmtDur(mins * 60) : ""}</span>
+                </div>
+              </div>
+            ); };
             return (
               <>
                 {run && (() => { const su = subjects.find((x) => x.id === run.subjectId); const sec = Math.max(0, (now - run.since) / 1000); return (
@@ -3240,15 +3274,19 @@ const { useState, useEffect, useRef } = React;
                       const blocks = (state.study.sessions || []).filter((ss) => sessDate(ss) === studyLogDate).sort((a, b) => a.start - b.start);
                       if (blocks.length === 0) return <p style={{ fontFamily: "'Hanken Grotesk', sans-serif", fontSize: 13, color: C.soft, margin: 0, textAlign: "center" }}>No study blocks this day.</p>;
                       return blocks.map((ss) => { const su = subjects.find((x) => x.id === ss.subjectId); return (
-                        <div key={ss.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 2px", borderBottom: `1px solid ${C.bg}` }}>
+                        <React.Fragment key={ss.id}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 2px", borderBottom: `1px solid ${C.bg}` }}>
                           <span style={{ fontSize: 15, width: 20, textAlign: "center" }}>{su ? su.emoji : "📘"}</span>
                           <div style={{ flex: 1, minWidth: 0 }}>
                             <div style={{ fontFamily: "'Hanken Grotesk', sans-serif", fontSize: 14, color: C.ink }}>{su ? su.name : "(removed)"} <span style={{ fontFamily: "'DM Mono', monospace", fontSize: 9.5, color: C.soft }}>{ss.type || "Study"}</span></div>
                             <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 10.5, color: C.faint }}>{new Date(ss.start).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}{ss.note ? " · " + ss.note : ""}</div>
                           </div>
                           <span style={{ fontFamily: "'DM Mono', monospace", fontSize: 12.5, color: C.ink }}>{fmtDur(ss.secs)}</span>
+                          <button onClick={() => openEdit(ss)} title="Edit this block" style={{ ...ghostMini, color: esId === ss.id ? C.ink : C.soft }}>✎</button>
                           <button onClick={() => removeStudySession(ss.id)} style={{ ...ghostMini, color: C.ember }}>✕</button>
                         </div>
+                        {sessEditor(ss)}
+                        </React.Fragment>
                       ); });
                     })()}
                   </div>
@@ -3279,13 +3317,10 @@ const { useState, useEffect, useRef } = React;
                                 {ss.note && !editing ? <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 10.5, color: C.soft }}>💬 {ss.note}</div> : null}
                               </div>
                               <span style={{ fontFamily: "'DM Mono', monospace", fontSize: 12, color: C.ink }}>{fmtDur(ss.secs)}</span>
-                              <button onClick={() => setEsId(editing ? null : ss.id)} style={{ ...ghostMini, color: C.soft }}>{editing ? "done" : "✎"}</button>
+                              <button onClick={() => openEdit(ss)} style={{ ...ghostMini, color: editing ? C.ink : C.soft }}>✎</button>
                               <button onClick={() => removeStudySession(ss.id)} style={{ ...ghostMini, color: C.ember }}>✕</button>
                             </div>
-                            {editing ? (<div style={{ display: "flex", gap: 6, marginTop: 6 }}>
-                              <select value={ss.type || "Study"} onChange={(e) => editStudySession(ss.id, { type: e.target.value })} style={{ ...input, marginBottom: 0, flex: 1 }}>{SESSION_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}</select>
-                              <input value={ss.note || ""} onChange={(e) => editStudySession(ss.id, { note: e.target.value })} placeholder="note" style={{ ...input, marginBottom: 0, flex: 2 }} />
-                            </div>) : null}
+                            {sessEditor(ss)}
                           </div>
                         ); })}
                       </div>);
