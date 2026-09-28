@@ -4,7 +4,17 @@ Shell version is `APP_VERSION` near the top of `index.html` (inside QuickLogApp)
 `APP_VERSION`: Health, Muse, Streaks (ConsistencyApp), Practice. Bump the shell on every deploy; bump an app's
 version only when that app changed.
 
-## v7.74 — 2026-09-27
+## v7.76 — 2026-09-28 (Health v3.104 · Today v1.13)
+- **Steps now come from Oura first.** Withings steps come from the phone's motion sensor via the Withings app (formerly Health Mate), so they undercount whenever the phone isn't carried; the ring is worn all day. One shared rule (`window.__lcStepsBy`) now feeds every screen — the Steps habit auto-check, the habit detail, the Week card, the Steps tab, Insights and Today: **typed correction > Oura ring > Withings**. Withings only fills a day Oura has no count for.
+- **Steps tab → Sources · last 7 days**: Oura, Withings and the count in use side by side, bold = used, ✎ = typed. The dial and Today's walk step name the source ("from Oura").
+- Steps tab dial now uses the ramp goal for today (it was still reading the old fixed goal, so it disagreed with Today).
+
+2026-09-28 (Health v3.103)
+- **Other drinks on the Water tab.** A second card under the water log: one-tap presets (starts with 🍵 Unsweet tea, 16 oz, no sugar), **+ other** for anything else (name, optional oz, a **contains sugar / no sugar** toggle, note, and "save as a one-tap preset"), today's list with a sugar tag on each entry, and a 7-day count of drinks and sugar drinks. ✎ presets removes presets.
+- Stored separately as `drinkLog` / `drinkPresets` — nothing that reads `waterLog` changes: the water goal, Today's checkpoints, Stats and Insights are untouched. Sugar drinks are flagged and counted, not yet tied to the whole-foods habit or Today.
+- **History is kept.** Every drink is saved by date in `drinkLog` inside the Health row (same place as water) and syncs across devices; nothing prunes it, only × on an entry removes it. Only today's list and a 7-day count are shown so far — a full history view (Nutrition history or a Last 30 days list on Water) is queued once there's a couple of weeks of entries.
+
+2026-09-27
 - **Study → Log: edit a logged block.** ✎ on any block in the day list (and in History) opens an inline form — subject, start time, length (hr/min), type, note — then Save rewrites it in place. The day stays the same; the mirrored entry in the Time log moves with it. History's old type/note-only editor is replaced by the same form.
 
 ## v7.73 — 2026-09-27 (Today v1.12)

@@ -61,6 +61,15 @@ window.__lcSave = async function (sb, table, id, state, expected) {
   throw insErr;
 };
 /* small toast so a conflict reload is visible, whatever tab is open */
+// v7.76 — one steps-per-day rule for every screen: manual override > Oura ring > Withings app (phone motion; the app was called Health Mate until 2024).
+// Returns { [day]: { steps, src } } with src "entered" | "Oura" | "Withings".
+window.__lcStepsBy = function (hd) {
+  hd = hd || {}; const m = {};
+  ((hd.withings && hd.withings.days) || []).forEach((d) => { if (d && d.day && d.steps != null) m[d.day] = { steps: Number(d.steps), src: "Withings" }; });
+  ((hd.oura && hd.oura.days) || []).forEach((d) => { if (d && d.day && d.ouraSteps != null && Number(d.ouraSteps) > 0) m[d.day] = { steps: Number(d.ouraSteps), src: "Oura" }; });
+  const ov = hd.stepsOverride || {}; Object.keys(ov).forEach((d) => { if (ov[d] != null) m[d] = { steps: Number(ov[d]), src: "entered" }; });
+  return m;
+};
 window.__lcToast = function (msg, ms) {
   try {
     let el = document.getElementById("lc-toast");
@@ -89,7 +98,7 @@ const { useState, useEffect, useRef } = React;
     const SUPABASE_ANON  = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNsd2xuYnp4cmFpYXZwY2pidml5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQyMzg5NjksImV4cCI6MjA4OTgxNDk2OX0.-r80YRrZG2us0kQwFpo0IKbmYX45VsF8TFFnYPT3qsM";
     const TABLE         = "quick_log";
     const USER_KEY      = "linda";
-    const APP_VERSION   = "v7.74 · 2026-09-27";
+    const APP_VERSION   = "v7.76 · 2026-09-28";
     const TIME_ANALYZE_URL = "https://le-cadence-analyze.lesteps24.workers.dev/";
     const IDLE_GOAL_HRS = 1;   // target: no more than 1 hour of idle / TV per day
     const SESSION_TYPES = ["Study", "Class", "Quiz/Test", "Project", "Other"];
@@ -5382,7 +5391,7 @@ const { useState, useEffect, useRef } = React;
     const TABLE         = "hundred_days";
     const USER_KEY      = "linda";              // any fixed label; names your single saved row
     const ANALYZE_URL   = "https://hundred-days-analyze.lesteps24.workers.dev/";                   // your trends Worker
-    const APP_VERSION   = "v3.102 · 2026-09-27";  // bump this each update so you can confirm a deploy
+    const APP_VERSION   = "v3.104 · 2026-09-28";  // bump this each update so you can confirm a deploy
     const DEMO_URL      = "https://www.instagram.com/reel/DWACMUODNN1/";  // Movement routine demo
     /* ============================================================ */
 
@@ -5506,6 +5515,7 @@ const { useState, useEffect, useRef } = React;
     const HEALTH_SOURCES = [["withings", "Withings"], ["oura", "Oura"], ["whoop", "Whoop"], ["strava", "Strava"]];
     const HEALTH_ALL_TABS = [...HEALTH_TAB_ROWS.flat().filter(([k]) => k !== "sources" && k !== "today"), ...HEALTH_SOURCES];
     // Editable in Settings → Water quick-add (stored as state.waterPresets). Decimals allowed.
+    const DEFAULT_DRINK_PRESETS = [{ name: "Unsweet tea", oz: 16, sugar: false, emoji: "🍵" }];
     const DEFAULT_WATER_PRESETS = [
       { oz: 16.9, label: "1 bottle", note: "Fiji 500 ml" },
       { oz: 8.5,  label: "½ bottle", note: "Fiji ½" },
@@ -5610,6 +5620,8 @@ const { useState, useEffect, useRef } = React;
       labs: [],                                          // [{ date, source, fasting, note, values: { a1c, ldl, … } }]
       measurements: [],                                  // [{ date, source, waist, hips, chest, arm, thigh, neck }] in inches
       waterPresets: DEFAULT_WATER_PRESETS.map((x) => ({ ...x })),   // water quick-add buttons (oz, label, note)
+      drinkPresets: DEFAULT_DRINK_PRESETS.map((x) => ({ ...x })),   // v3.103 — other drinks, one-tap (name, oz, sugar)
+      drinkLog: {},                                                   // { [date]: [{ id, name, oz, sugar, t, note }] } — never counts toward water
       supplements: [
         { id: "s1", name: "Vitamin D", emoji: "☀️" },
         { id: "s2", name: "Iron", emoji: "💧" },
@@ -5760,6 +5772,9 @@ const { useState, useEffect, useRef } = React;
       if (!merged._labs2024V1) { if (!merged.labs.some((l) => l && l.date === LABS_2024.date)) merged.labs = [...merged.labs, { ...LABS_2024, values: { ...LABS_2024.values } }]; merged._labs2024V1 = true; }
       merged.labs = merged.labs.filter((l) => l && /^\d{4}-\d{2}-\d{2}$/.test(l.date)).sort((a, b) => (a.date < b.date ? 1 : -1));
       if (!Array.isArray(merged.waterPresets) || !merged.waterPresets.length) merged.waterPresets = DEFAULT_WATER_PRESETS.map((x) => ({ ...x }));
+      if (!Array.isArray(merged.drinkPresets)) merged.drinkPresets = DEFAULT_DRINK_PRESETS.map((x) => ({ ...x }));
+      merged.drinkPresets = merged.drinkPresets.filter((x) => x && String(x.name || "").trim()).slice(0, 12).map((x) => ({ name: String(x.name).trim(), oz: Math.round((Number(x.oz) || 0) * 10) / 10, sugar: !!x.sugar, emoji: String(x.emoji || "") }));
+      if (!merged.drinkLog || typeof merged.drinkLog !== "object") merged.drinkLog = {};
       merged.waterPresets = merged.waterPresets.filter((x) => x && Number(x.oz) > 0).slice(0, 4).map((x) => ({ oz: Math.round(Number(x.oz) * 10) / 10, label: String(x.label || (x.oz + " oz")), note: String(x.note || "") }));
       for (let i = 0; i < 7; i++) { if (!["lift", "cardio", "both", "rest"].includes(merged.workoutPlan[i])) merged.workoutPlan[i] = DEFAULT_WORKOUT_PLAN[i]; }
       if (!Array.isArray(merged.supplements)) merged.supplements = def.supplements;
@@ -6183,6 +6198,8 @@ const { useState, useEffect, useRef } = React;
       const [analyzeErr, setAnalyzeErr] = useState("");
       const [waterOz, setWaterOz] = useState(String(BOTTLE_OZ));
       const [editWater, setEditWater] = useState(null);
+      const [drinkForm, setDrinkForm] = useState(null);          // v3.103 — { name, oz, sugar, note, save }
+      const [editDrinkPresets, setEditDrinkPresets] = useState(false);
       const [waterNote, setWaterNote] = useState("");
       const [goalInput, setGoalInput] = useState(null);   // null = not editing
       const [editWaterDesc, setEditWaterDesc] = useState(false);
@@ -6411,10 +6428,8 @@ const { useState, useEffect, useRef } = React;
         if (!stepsHabit) return;
         const goalOn = (day) => stepsGoalFor(state.stepsRamp, day, state.stepsGoalPreRamp || state.stepsGoal || 10000);
         const sOv = state.stepsOverride || {};
-        const _bd = {};
-        ((state.withings && state.withings.days) || []).forEach((d) => { if (d.steps != null) _bd[d.day] = d.steps; });
-        Object.keys(sOv).forEach((day) => { if (sOv[day] != null) _bd[day] = sOv[day]; });
-        const wd = Object.keys(_bd).map((day) => ({ day, steps: _bd[day] }));
+        const _sb = window.__lcStepsBy(state);   // v7.76 — override > Oura > Withings
+        const wd = Object.keys(_sb).map((day) => ({ day, steps: _sb[day].steps }));
         if (!wd.length) return;
         const toCheck = [];
         wd.forEach((d) => {
@@ -6431,7 +6446,7 @@ const { useState, useEffect, useRef } = React;
           });
           return { ...s, completions };
         });
-      }, [state && state.withings && state.withings.days, state && state.stepsOverride, state && state.stepsGoal, state && state.stepsRamp, state && state.habits, state && state.completions]);
+      }, [state && state.withings && state.withings.days, state && state.oura && state.oura.days, state && state.stepsOverride, state && state.stepsGoal, state && state.stepsRamp, state && state.habits, state && state.completions]);
 
       // One-way auto-check for the Morning routine habit: finishing the Morning routine (morningLog[day]) ticks it.
       // Never auto-uncheck (protects the streak). "Enter once, reuse everywhere."
@@ -6578,11 +6593,9 @@ const { useState, useEffect, useRef } = React;
           return isToday && !done ? "Waiting for sync" : (done ? "Manually checked" : null);
         }
         if (/\bsteps\b/i.test(name)) {
-          const ov = (state.stepsOverride || {})[day];
-          const w = ((state.withings && state.withings.days) || []).find((d) => d.day === day);
-          const n = ov != null ? ov : (w && w.steps != null ? w.steps : null);
+          const sb = window.__lcStepsBy(state)[day]; const n = sb ? sb.steps : null;
           const goal = stepsGoalFor(state.stepsRamp, day, state.stepsGoalPreRamp || state.stepsGoal || 10000);
-          if (n != null) return done ? `${ov != null ? "Entered" : "From Withings"} · ${n.toLocaleString()} of ${goal.toLocaleString()}` : `${n.toLocaleString()} of ${goal.toLocaleString()} so far`;
+          if (n != null) return done ? `${sb.src === "entered" ? "Entered" : "From " + sb.src} · ${n.toLocaleString()} of ${goal.toLocaleString()}` : `${n.toLocaleString()} of ${goal.toLocaleString()} so far · ${sb.src}`;
           return isToday && !done ? "Waiting for sync" : (done ? "Manually checked" : null);
         }
         if (id === "h_morning") return (state.morningLog || {})[day] ? "Completed from Morning routine" : (done ? "Manually checked" : null);
@@ -6690,6 +6703,11 @@ const { useState, useEffect, useRef } = React;
       const ozToCups = (oz) => Math.round((oz / 8) * 10) / 10;
       const addWater = (oz, note) => { const n = parseFloat(oz); if (!n || n <= 0) return false; setState((s) => { const log = { ...(s.waterLog || {}) }; const day = [...(log[today] || [])]; day.push({ id: String(Date.now()), oz: n, t: Date.now(), note: (note || "").trim() }); log[today] = day; return { ...s, waterLog: log }; }); return true; };
       const removeWater = (dateStr, id) => setState((s) => { const log = { ...(s.waterLog || {}) }; log[dateStr] = (log[dateStr] || []).filter((e) => e.id !== id); return { ...s, waterLog: log }; });
+      // v3.103 — other drinks. Separate log so nothing that reads waterLog (goal ring, Today checkpoints, Stats) changes.
+      const addDrink = (d) => { const name = String(d.name || "").trim(); if (!name) return false; setState((s) => { const log = { ...(s.drinkLog || {}) }; const day = [...(log[today] || [])]; day.push({ id: "d" + Date.now(), name, oz: Math.round((parseFloat(d.oz) || 0) * 10) / 10, sugar: !!d.sugar, t: Date.now(), note: String(d.note || "").trim() }); log[today] = day; let presets = s.drinkPresets || []; if (d.save && !presets.some((p) => p.name.toLowerCase() === name.toLowerCase())) presets = [...presets, { name, oz: Math.round((parseFloat(d.oz) || 0) * 10) / 10, sugar: !!d.sugar, emoji: d.sugar ? "🥤" : "🍵" }].slice(0, 12); return { ...s, drinkLog: log, drinkPresets: presets }; }); return true; };
+      const removeDrink = (dateStr, id) => setState((s) => { const log = { ...(s.drinkLog || {}) }; log[dateStr] = (log[dateStr] || []).filter((e) => e.id !== id); return { ...s, drinkLog: log }; });
+      const removeDrinkPreset = (i) => setState((s) => ({ ...s, drinkPresets: (s.drinkPresets || []).filter((_, j) => j !== i) }));
+      const drinksFor = (dateStr) => (state.drinkLog || {})[dateStr] || [];
       const updateWater = (dateStr, id, patch) => setState((s) => { const log = { ...(s.waterLog || {}) }; log[dateStr] = (log[dateStr] || []).map((e) => (e.id === id ? { ...e, ...patch } : e)); return { ...s, waterLog: log }; });
       const setWaterGoal = (n) => setState((s) => ({ ...s, waterGoal: Math.max(0, parseFloat(n) || 0) }));
 
@@ -7212,9 +7230,7 @@ const { useState, useEffect, useRef } = React;
               const AMBER = "#A9822F";
               const DL = ["M", "T", "W", "T", "F", "S", "S"];
               // steps per day: Withings + manual overrides (same sources as the steps habit)
-              const stepsBy = {};
-              ((state.withings && state.withings.days) || []).forEach((d) => { if (d.day && d.steps != null) stepsBy[d.day] = d.steps; });
-              Object.keys(state.stepsOverride || {}).forEach((d) => { if (state.stepsOverride[d] != null) stepsBy[d] = state.stepsOverride[d]; });
+              const stepsBy = {}; const _sb = window.__lcStepsBy(state); Object.keys(_sb).forEach((d) => { stepsBy[d] = _sb[d].steps; });
               const goalOn = (d) => stepsGoalFor(state.stepsRamp, d, state.stepsGoalPreRamp || state.stepsGoal || 10000);
               const goal = goalOn(today);
               const nextStep = (state.stepsRamp || []).filter((r) => r.from > today).sort((a, b) => (a.from < b.from ? -1 : 1))[0] || null;
@@ -7509,6 +7525,54 @@ const { useState, useEffect, useRef } = React;
                     )}
                   </div>
                 </div>
+
+                {/* v3.103 — other drinks: one tap per preset; "other" opens a form; sugar is a flag on every entry */}
+                {(() => {
+                  const dl = [...drinksFor(today)].sort((a, b) => b.t - a.t); const sugarN = dl.filter((e) => e.sugar).length;
+                  const presets = state.drinkPresets || [];
+                  const wkDrinks = days.reduce((a, { d }) => a + drinksFor(d).length, 0), wkSugar = days.reduce((a, { d }) => a + drinksFor(d).filter((e) => e.sugar).length, 0);
+                  const f = drinkForm;
+                  return (
+                    <div style={{ ...card, marginTop: 14 }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 4 }}>
+                        <h2 style={h2}>🍵 Other drinks</h2>
+                        <button onClick={() => setEditDrinkPresets((v) => !v)} style={ghostMini}>{editDrinkPresets ? "✓ done" : "✎ presets"}</button>
+                      </div>
+                      <p style={{ fontFamily: "'Hanken Grotesk', sans-serif", fontSize: 13, color: C.soft, margin: "0 0 12px" }}>Tea, coffee, soda, wine — anything that isn't water. Never counts toward the water goal. Sugar is flagged per drink.</p>
+                      <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 8 }}>
+                        {presets.map((p, i) => (
+                          <button key={i + "-" + p.name} onClick={() => { if (editDrinkPresets) removeDrinkPreset(i); else if (addDrink(p)) window.__lcToast(`${p.name} logged ✓`); }} style={{ flex: "1 1 0", minWidth: 96, padding: "8px 6px", border: `1px solid ${editDrinkPresets ? C.ember : C.line}`, borderRadius: 9, background: C.paper, color: C.ink, fontFamily: "'Hanken Grotesk', sans-serif", fontWeight: 700, fontSize: 12.5, cursor: "pointer", lineHeight: 1.15 }}>{editDrinkPresets ? "✕ " : ""}{p.emoji ? p.emoji + " " : ""}{p.name}<br /><span style={{ fontFamily: "'DM Mono', monospace", fontSize: 9.5, fontWeight: 500, opacity: 0.85 }}>{p.oz ? p.oz + " oz · " : ""}{p.sugar ? "sugar" : "no sugar"}</span></button>
+                        ))}
+                        <button onClick={() => setDrinkForm(f ? null : { name: "", oz: "", sugar: false, note: "", save: false })} style={{ flex: "1 1 0", minWidth: 96, padding: "8px 6px", border: `1px dashed ${C.line}`, borderRadius: 9, background: "transparent", color: C.soft, fontFamily: "'Hanken Grotesk', sans-serif", fontWeight: 700, fontSize: 12.5, cursor: "pointer" }}>{f ? "− close" : "+ other"}</button>
+                      </div>
+                      {f ? (
+                        <div style={{ padding: 10, border: `1px solid ${C.line}`, borderRadius: 10, background: C.bg, marginBottom: 10 }}>
+                          <input value={f.name} onChange={(e) => setDrinkForm({ ...f, name: e.target.value })} placeholder="drink — e.g. Coffee, Diet Coke, Red wine" style={input} />
+                          <div style={{ display: "flex", gap: 8, marginBottom: 8, alignItems: "center" }}>
+                            <input type="number" inputMode="decimal" step="0.1" min="0" value={f.oz} onChange={(e) => setDrinkForm({ ...f, oz: e.target.value })} placeholder="oz (optional)" style={{ ...input, marginBottom: 0, flex: 1 }} />
+                            <button onClick={() => setDrinkForm({ ...f, sugar: !f.sugar })} style={{ flex: "0 0 auto", padding: "9px 12px", borderRadius: 9, border: `1px solid ${f.sugar ? C.ember : C.line}`, background: f.sugar ? C.ember : C.paper, color: f.sugar ? "#fff" : C.ink, fontFamily: "'Hanken Grotesk', sans-serif", fontWeight: 700, fontSize: 12.5, cursor: "pointer" }}>{f.sugar ? "contains sugar" : "no sugar"}</button>
+                          </div>
+                          <input value={f.note} onChange={(e) => setDrinkForm({ ...f, note: e.target.value })} placeholder="note (optional)" style={input} />
+                          <label style={{ display: "flex", alignItems: "center", gap: 8, fontFamily: "'Hanken Grotesk', sans-serif", fontSize: 13, color: C.soft, marginBottom: 10, cursor: "pointer" }}><input type="checkbox" checked={f.save} onChange={(e) => setDrinkForm({ ...f, save: e.target.checked })} /> Save as a one-tap preset</label>
+                          <button onClick={() => { if (addDrink(f)) { window.__lcToast(`${f.name.trim()} logged ✓`); setDrinkForm(null); } else window.__lcToast("Name the drink"); }} style={{ ...tabBtn(true), width: "100%", padding: "11px", background: C.ink }}>+ Log drink</button>
+                        </div>
+                      ) : null}
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginTop: 6, marginBottom: 4 }}>
+                        <span style={{ fontFamily: "'Fraunces', serif", fontSize: 15, fontWeight: 600, color: C.ink }}>Today</span>
+                        <span style={{ fontFamily: "'DM Mono', monospace", fontSize: 12, color: sugarN ? C.ember : C.soft }}>{dl.length} drink{dl.length === 1 ? "" : "s"} · {sugarN} with sugar</span>
+                      </div>
+                      {dl.length === 0 ? <p style={{ fontFamily: "'Hanken Grotesk', sans-serif", fontSize: 13, color: C.soft, textAlign: "center", margin: "6px 0 0" }}>Nothing but water so far.</p> : dl.map((e) => (
+                        <div key={e.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 2px", borderBottom: `1px solid ${C.bg}` }}>
+                          <span style={{ fontFamily: "'DM Mono', monospace", fontSize: 11, color: C.soft, width: 60 }}>{new Date(e.t).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</span>
+                          <span style={{ flex: 1, fontFamily: "'Hanken Grotesk', sans-serif", fontSize: 14, color: C.ink, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{e.name}{e.oz ? <span style={{ fontFamily: "'DM Mono', monospace", fontSize: 10.5, color: C.soft }}> · {e.oz} oz</span> : null}{e.note ? <span style={{ fontFamily: "'DM Mono', monospace", fontSize: 10.5, color: C.soft }}> · {e.note}</span> : null}</span>
+                          <span style={{ fontFamily: "'DM Mono', monospace", fontSize: 9.5, borderRadius: 5, padding: "1px 6px", color: e.sugar ? C.ember : C.sage, background: e.sugar ? "#F3E4DC" : "#E6EBDF" }}>{e.sugar ? "sugar" : "no sugar"}</span>
+                          <button onClick={() => removeDrink(today, e.id)} style={{ ...ghostMini, color: C.ember, fontSize: 16, lineHeight: 1, padding: "4px 6px" }}>×</button>
+                        </div>
+                      ))}
+                      <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 11, color: C.soft, marginTop: 10 }}>Last 7 days: {wkDrinks} drink{wkDrinks === 1 ? "" : "s"} · {wkSugar} with sugar</div>
+                    </div>
+                  );
+                })()}
 
                 <div style={{ ...card, marginTop: 14 }}>
                   <p style={miniLabel}>LAST 7 DAYS</p>
@@ -8501,11 +8565,13 @@ const { useState, useEffect, useRef } = React;
 
           {/* STEPS */}
           {view === "steps" && (() => {
-            const goal = state.stepsGoal || 10000;
+            const goal = stepsGoalFor(state.stepsRamp, today, state.stepsGoalPreRamp || state.stepsGoal || 10000);   // v3.104 — ramp-aware, same as Today
             const sOv = state.stepsOverride || {};
             const _byDay = {};
-            ((state.withings && state.withings.days) || []).forEach((d) => { if (d.steps != null) _byDay[d.day] = { ...d }; });
-            Object.keys(sOv).forEach((day) => { if (sOv[day] != null) _byDay[day] = { ...(_byDay[day] || { day }), steps: sOv[day], _ov: true }; });
+            ((state.withings && state.withings.days) || []).forEach((d) => { if (d.steps != null) _byDay[d.day] = { ...d, _wSteps: d.steps }; });
+            ((state.oura && state.oura.days) || []).forEach((d) => { if (d.ouraSteps != null) _byDay[d.day] = { ...(_byDay[d.day] || { day: d.day }), _oSteps: d.ouraSteps }; });
+            const _sb = window.__lcStepsBy(state);   // v7.76 — override > Oura > Withings; each row keeps both raw counts for the breakdown
+            Object.keys(_sb).forEach((day) => { _byDay[day] = { ...(_byDay[day] || { day }), steps: _sb[day].steps, _src: _sb[day].src, _ov: _sb[day].src === "entered" }; });
             const all = Object.values(_byDay).filter((d) => d.steps != null);
             const days = [...all].sort((a, b) => (a.day < b.day ? 1 : -1)); // newest first
             const recent = [...days].reverse().slice(-21); // oldest→newest, last 21
@@ -8530,7 +8596,7 @@ const { useState, useEffect, useRef } = React;
                     <span style={{ fontFamily: "'DM Mono', monospace", fontSize: 11, color: C.soft }}>goal {goal.toLocaleString()}/day</span>
                   </div>
                   {days.length === 0 ? (
-                    <p style={{ fontFamily: "'Hanken Grotesk', sans-serif", fontSize: 13, color: C.soft, margin: "10px 0 0", lineHeight: 1.5 }}>No step data yet. Steps come from your Withings sync — you'll need to re-authorize for activity first (see the note on the Withings tab), then tap Sync.</p>
+                    <p style={{ fontFamily: "'Hanken Grotesk', sans-serif", fontSize: 13, color: C.soft, margin: "10px 0 0", lineHeight: 1.5 }}>No step data yet. Steps come from the Oura sync (Withings as a fallback, and anything you type below wins over both).</p>
                   ) : (
                     <>
                       <div style={{ display: "flex", justifyContent: "center", marginTop: 14 }}>
@@ -8543,7 +8609,7 @@ const { useState, useEffect, useRef } = React;
                             <div style={{ fontFamily: "'Fraunces', serif", fontWeight: 700, fontSize: 34, color: C.ink, lineHeight: 1, letterSpacing: -0.5 }}>{latest ? latest.steps.toLocaleString() : "—"}</div>
                             <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 10, color: C.soft, marginTop: 4 }}>steps · of {goal.toLocaleString()}</div>
                             <div style={{ fontFamily: "'Hanken Grotesk', sans-serif", fontSize: 16, fontWeight: 700, color: dialColor, marginTop: 8 }}>{latestMi != null ? latestMi.toFixed(1) + " mi" : "—"}</div>
-                            <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 9.5, color: C.faint, marginTop: 3 }}>{Math.round(pct * 100)}% · {latest ? (latest.day || "").slice(5) : ""}</div>
+                            <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 9.5, color: C.faint, marginTop: 3 }}>{Math.round(pct * 100)}% · {latest ? (latest.day || "").slice(5) : ""}{latest && latest._src ? " · " + latest._src : ""}</div>
                           </div>
                         </div>
                       </div>
@@ -8582,9 +8648,24 @@ const { useState, useEffect, useRef } = React;
                       <span style={{ fontFamily: "'DM Mono', monospace", fontSize: 9, color: C.navy }}>– – goal {goal.toLocaleString()}</span>
                       <span style={{ fontFamily: "'DM Mono', monospace", fontSize: 9, color: C.faint }}>{(recent[recent.length - 1].day || "").slice(5)}</span>
                     </div>
-                    <p style={{ fontFamily: "'Hanken Grotesk', sans-serif", fontSize: 11, color: C.soft, margin: "10px 0 0", lineHeight: 1.45 }}>Pulled from Withings. Green bars cleared {goal.toLocaleString()}. Sync more history (up to 365 days) on the Withings tab.</p>
+                    <p style={{ fontFamily: "'Hanken Grotesk', sans-serif", fontSize: 11, color: C.soft, margin: "10px 0 0", lineHeight: 1.45 }}>Oura first, Withings when Oura has no count, typed corrections over both. Green bars cleared {goal.toLocaleString()}.</p>
                   </div>
                 )}
+                {/* v7.76 — where each day's number came from, so a wrong count can be traced */}
+                <div style={{ ...card, marginTop: 12 }}>
+                  <p style={miniLabel}>SOURCES · LAST 7 DAYS</p>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr auto auto auto", gap: "4px 14px", fontFamily: "'DM Mono', monospace", fontSize: 11, marginTop: 6 }}>
+                    <span style={{ color: C.faint }}></span><span style={{ color: C.faint, textAlign: "right" }}>Oura</span><span style={{ color: C.faint, textAlign: "right" }}>Withings</span><span style={{ color: C.faint, textAlign: "right" }}>used</span>
+                    {Array.from({ length: 7 }, (_, i) => addDays(today, -i)).map((d) => { const r = _byDay[d] || {}; const cell = (v, on) => <span style={{ textAlign: "right", color: on ? C.ink : C.faint, fontWeight: on ? 700 : 400 }}>{v != null ? Number(v).toLocaleString() : "—"}</span>; return (
+                      <React.Fragment key={d}>
+                        <span style={{ color: d === today ? C.ink : C.soft }}>{d === today ? "Today" : prettyDate(d)}</span>
+                        {cell(r._oSteps, r._src === "Oura")}{cell(r._wSteps, r._src === "Withings")}
+                        <span style={{ textAlign: "right", color: r._src === "entered" ? C.ember : C.sage }}>{r.steps != null ? Number(r.steps).toLocaleString() : "—"}{r._src === "entered" ? " ✎" : ""}</span>
+                      </React.Fragment>
+                    ); })}
+                  </div>
+                  <p style={{ fontFamily: "'Hanken Grotesk', sans-serif", fontSize: 11, color: C.soft, margin: "10px 0 0", lineHeight: 1.45 }}>Bold is the count in use. Withings counts come from the Withings app on your phone (phone motion only, unless you add a Withings watch); Oura is the ring. Withings only fills in when Oura has nothing for that day. ✎ = typed in Correct steps.</p>
+                </div>
               </>
             );
           })()}
@@ -12073,9 +12154,7 @@ const ConsistencyApp = (function () {
     if (_slpIds.length) { const _qlog = (ql && ql.log) || {}; Object.keys(_qlog).forEach((day) => { let secs = 0; ((_qlog[day] && _qlog[day].sessions) || []).forEach((ss) => { if (!ss || !_slpIds.includes(ss.cat)) return; if (ss.auto === "withings" || ss.auto === "oura") return; const dd = ss.secs != null ? ss.secs : ((ss.end && ss.start) ? (ss.end - ss.start) / 1000 : 0); if (dd > 0) secs += dd; }); if (secs > 0) sleepMap[day] = +(secs / 3600).toFixed(2); }); }
     const sleepOv = hd.sleepOverride || {}; Object.keys(sleepOv).forEach((d) => { if (sleepOv[d] != null) sleepMap[d] = sleepOv[d]; });
     const stepOv = hd.stepsOverride || {};
-    const stepsMap = {};
-    ((hd.withings && hd.withings.days) || []).forEach((dd) => { if (dd.day && dd.steps != null) stepsMap[dd.day] = dd.steps; });
-    Object.keys(stepOv).forEach((d) => { if (stepOv[d] != null) stepsMap[d] = stepOv[d]; });
+    const stepsMap = {}; const _sbm = window.__lcStepsBy(hd); Object.keys(_sbm).forEach((d) => { stepsMap[d] = _sbm[d].steps; });
     const workMap = {};
     ((hd.withings && hd.withings.days) || []).forEach((dd) => { if (dd.day && dd.workoutMin != null) workMap[dd.day] = Math.max(workMap[dd.day] || 0, dd.workoutMin); });
     ((hd.oura && hd.oura.days) || []).forEach((dd) => { if (!dd.day) return; const w = Math.max(dd.workoutMin || 0, dd.activeMin || 0); if (w > 0) workMap[dd.day] = Math.max(workMap[dd.day] || 0, w); });
@@ -13572,7 +13651,7 @@ const PracticeApp = (function () {
 const TodayApp = (function () {
   const { useState, useEffect, useRef } = React;
   const sb = (typeof window !== "undefined" && window.__SB) ? window.__SB : null;
-  const APP_VERSION = "v1.12 · 2026-09-27";
+  const APP_VERSION = "v1.13 · 2026-09-28";
   const RUN_FROM = "2026-09-28";        // the run counts from this day — Linda's reset for Sept 28
   const STUDY_TARGET_MIN = 120;         // 2 h/day is the bar; 3 h is the stretch shown in the detail
   const STUDY_STRETCH_MIN = 180;
@@ -13650,8 +13729,9 @@ const TodayApp = (function () {
     const rampList = (Array.isArray(hd.stepsRamp) ? hd.stepsRamp : []).filter((r) => r && /^\d{4}-\d{2}-\d{2}$/.test(r.from) && Number(r.goal) > 0).sort((a, b) => (a.from < b.from ? -1 : 1));
     let stepsGoal = null; rampList.forEach((r) => { if (r.from <= ds) stepsGoal = Number(r.goal); });
     if (stepsGoal == null) stepsGoal = Number(hd.stepsGoalPreRamp) || Number(hd.stepsGoal) || 10000;
-    const stepsOv = (hd.stepsOverride || {})[ds];
-    const stepsN = stepsOv != null ? stepsOv : (w && w.steps != null ? w.steps : null);
+    const _sbT = window.__lcStepsBy(hd)[ds] || null;   // v7.76 — override > Oura > Withings
+    const stepsOv = _sbT && _sbT.src === "entered" ? _sbT.steps : undefined;
+    const stepsN = _sbT ? _sbT.steps : null; const stepsSrc = _sbT ? _sbT.src : null;
     const stravaToday = ((hd.strava && hd.strava.workouts) || []).filter((x) => x && x.day === ds && !x.ignored);
     // v1.12 — minutes typed on the Today week card (gym machines not on Strava) count like a Strava cardio day
     const manualCardio = Number((((wo || {})[ds]) || {}).cardio) || 0;
@@ -13665,8 +13745,8 @@ const TodayApp = (function () {
     // v1.3: Withings days carry weightLb / weightKg (not "weight") — this is why the Sept 27 weigh-in never ticked
     const wU = (hd.weightUnit || "lb") === "kg" ? "kg" : "lb";
     const wVal = !w ? null : wU === "kg" ? (w.weightKg != null ? w.weightKg : (w.weightLb != null ? Math.round(w.weightLb / 2.20462 * 10) / 10 : null)) : (w.weightLb != null ? w.weightLb : (w.weightKg != null ? Math.round(w.weightKg * 2.20462 * 10) / 10 : null));
-    return { morningDone, bp, stepsGoal, stepsN, stepsOv: stepsOv != null, liftDone, cardioDone, manualCardio, cardioByHabit: !!comp.h_cardio, stravaNames, museToday, lastTrends, lastLab, lastScan,
-      wholeDone, wholeAll, wholeN, sugar: !!nut.sugar, fastDone, fastMin, fastGoal, invHrs, invGoal, invAny: !!inv, suppN, suppTotal: supps.length, noonN, noonTotal: noonSet.length, nightN, nightTotal: nightSet.length, noonNames: names(noonSet), nightNames: names(nightSet), waterGoal, weight: wVal, steps: w && w.steps != null ? w.steps : null, waterOz, waterN: water.length,
+    return { morningDone, bp, stepsGoal, stepsN, stepsSrc, stepsOv: stepsOv != null, liftDone, cardioDone, manualCardio, cardioByHabit: !!comp.h_cardio, stravaNames, museToday, lastTrends, lastLab, lastScan,
+      wholeDone, wholeAll, wholeN, sugar: !!nut.sugar, fastDone, fastMin, fastGoal, invHrs, invGoal, invAny: !!inv, suppN, suppTotal: supps.length, noonN, noonTotal: noonSet.length, nightN, nightTotal: nightSet.length, noonNames: names(noonSet), nightNames: names(nightSet), waterGoal, weight: wVal, steps: stepsN, waterOz, waterN: water.length,
       lunch: !!(nut.lunch || nut.lFood), lunchTxt: nut.lFood || nut.lunch || "", dinner: !!(nut.dinner || nut.dFood), dinnerTxt: nut.dFood || nut.dinner || "",
       stopped: nut.stoppedTonight || "", studyMin, subjects, errs, qsets: qsets.length, drilled, plan, nextWeekPlanned, weightUnit: wU };
   }
@@ -13686,7 +13766,7 @@ const TodayApp = (function () {
     const wd = (need) => `${oz} of ${g} oz` + (oz >= need ? "" : ` · ${need - oz} more for this checkpoint`);
     S.push({ block: "Morning", id: "water1", label: `Water — ${third} oz by noon`, core: false, optional: true, done: oz >= third, detail: wd(third), go: ["health", "water"] });
     S.push({ block: "Noon", id: "water2", label: `Water — ${twoThirds} oz by mid-afternoon`, core: false, optional: true, done: oz >= twoThirds, detail: wd(twoThirds), go: ["health", "water"] });
-    S.push({ block: "Afternoon", id: "walk", label: `Walk — ${f.stepsGoal.toLocaleString()} steps (today's ramp goal)`, core: true, done: f.stepsN != null && f.stepsN >= f.stepsGoal, detail: f.stepsN != null ? `${f.stepsN.toLocaleString()} of ${f.stepsGoal.toLocaleString()}${f.stepsOv ? " · entered" : " · from Withings"}` : "waiting for Withings steps", go: ["health", "steps"] });
+    S.push({ block: "Afternoon", id: "walk", label: `Walk — ${f.stepsGoal.toLocaleString()} steps (today's ramp goal)`, core: true, done: f.stepsN != null && f.stepsN >= f.stepsGoal, detail: f.stepsN != null ? `${f.stepsN.toLocaleString()} of ${f.stepsGoal.toLocaleString()} · ${f.stepsOv ? "entered" : "from " + f.stepsSrc}` : "waiting for Oura steps", go: ["health", "steps"] });
     S.push({ block: "Afternoon", id: "water3", label: `Water — ${g} oz goal, done before evening`, core: true, done: oz >= g, detail: wd(g), go: ["health", "water"] });
     S.push({ block: "Noon", id: "lunch", label: "Log lunch (Same as yesterday if it repeats)", core: false, optional: true, done: f.lunch, detail: f.lunch ? f.lunchTxt.slice(0, 40) : "optional", go: ["health", "nutrition"] });
     S.push({ block: "Morning", id: "fast", label: `Fast ${Math.round(f.fastGoal / 60)} h (from last night's stop time)`, core: true, done: f.fastDone, detail: f.fastMin != null ? `${Math.floor(f.fastMin / 60)}h ${f.fastMin % 60}m${f.fastDone ? "" : " · set 'started eating' when you break it"}` : "needs last night's stop time + today's start time", go: ["health", "nutrition"] });
