@@ -89,7 +89,7 @@ const { useState, useEffect, useRef } = React;
     const SUPABASE_ANON  = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNsd2xuYnp4cmFpYXZwY2pidml5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQyMzg5NjksImV4cCI6MjA4OTgxNDk2OX0.-r80YRrZG2us0kQwFpo0IKbmYX45VsF8TFFnYPT3qsM";
     const TABLE         = "quick_log";
     const USER_KEY      = "linda";
-    const APP_VERSION   = "v7.71 · 2026-09-27";
+    const APP_VERSION   = "v7.72 · 2026-09-27";
     const TIME_ANALYZE_URL = "https://le-cadence-analyze.lesteps24.workers.dev/";
     const IDLE_GOAL_HRS = 1;   // target: no more than 1 hour of idle / TV per day
     const SESSION_TYPES = ["Study", "Class", "Quiz/Test", "Project", "Other"];
@@ -5347,7 +5347,7 @@ const { useState, useEffect, useRef } = React;
     const TABLE         = "hundred_days";
     const USER_KEY      = "linda";              // any fixed label; names your single saved row
     const ANALYZE_URL   = "https://hundred-days-analyze.lesteps24.workers.dev/";                   // your trends Worker
-    const APP_VERSION   = "v3.101 · 2026-09-27";  // bump this each update so you can confirm a deploy
+    const APP_VERSION   = "v3.102 · 2026-09-27";  // bump this each update so you can confirm a deploy
     const DEMO_URL      = "https://www.instagram.com/reel/DWACMUODNN1/";  // Movement routine demo
     /* ============================================================ */
 
@@ -7635,6 +7635,12 @@ const { useState, useEffect, useRef } = React;
                   const apply = (m) => { const sl = SLOTS.find((x) => x[0] === m.slot); if (!sl) return; const patch = { [sl[2]]: m.food || "", [sl[3]]: !!m.whole }; if (m.time) patch[sl[4]] = m.time; set(patch); window.__lcToast(`${m.name} → ${sl[1].toLowerCase()}`); };
                   const saveCurrent = (slot) => { const sl = SLOTS.find((x) => x[0] === slot); const food = rec[sl[2]]; if (!food) { window.__lcToast(`Log ${sl[1].toLowerCase()} first, then save it`); return; } const name = prompt(`Name this ${sl[1].toLowerCase()}:`, String(food).slice(0, 24)); if (!name) return; setState((st) => ({ ...st, savedMeals: [...(st.savedMeals || []), { id: "m" + Date.now().toString(36), name: name.trim(), slot, food: String(food), whole: !!rec[sl[3]], time: rec[sl[4]] || "" }] })); };
                   const remove = (id) => { if (!confirm("Remove this saved meal?")) return; setState((st) => ({ ...st, savedMeals: (st.savedMeals || []).filter((m) => m.id !== id) })); };
+                  const edit = (m) => {   // v3.102: rename, change the food text, or flip whole-food
+                    const name = prompt("Name:", m.name); if (name === null) return;
+                    const food = prompt("Food (what gets logged):", m.food || ""); if (food === null) return;
+                    const whole = confirm("Count as whole food? OK = yes, Cancel = no");
+                    setState((st) => ({ ...st, savedMeals: (st.savedMeals || []).map((x) => x.id === m.id ? { ...x, name: name.trim() || x.name, food, whole } : x) }));
+                  };
                   return (
                     <div style={{ ...card, marginBottom: 12 }}>
                       <p style={miniLabel}>SAVED MEALS</p>
@@ -7644,6 +7650,7 @@ const { useState, useEffect, useRef } = React;
                           {ms.map((m) => (
                             <span key={m.id} style={{ display: "inline-flex", alignItems: "center", border: `1px solid ${C.line}`, borderRadius: 999, overflow: "hidden" }}>
                               <button onClick={() => apply(m)} title={m.food} style={{ ...ghostMini, padding: "6px 10px", border: "none", fontSize: 12 }}>{m.whole ? "🥗 " : ""}{m.name}</button>
+                              <button onClick={() => edit(m)} title="edit" style={{ ...ghostMini, padding: "6px 8px", border: "none", borderLeft: `1px solid ${C.line}`, color: C.soft, fontSize: 11 }}>✎</button>
                               <button onClick={() => remove(m.id)} title="remove" style={{ ...ghostMini, padding: "6px 8px", border: "none", borderLeft: `1px solid ${C.line}`, color: C.faint, fontSize: 11 }}>✕</button>
                             </span>
                           ))}

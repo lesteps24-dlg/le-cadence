@@ -4,6 +4,9 @@ Shell version is `APP_VERSION` near the top of `index.html` (inside QuickLogApp)
 `APP_VERSION`: Health, Muse, Streaks (ConsistencyApp), Practice. Bump the shell on every deploy; bump an app's
 version only when that app changed.
 
+## v7.72 — 2026-09-27 (Health v3.102)
+- Saved meals: **✎ edit** on each chip — rename, change the food text, flip the whole-food flag. Applying it afterwards uses the new values; days already logged are unchanged.
+
 ## v7.71 — 2026-09-27 (Health v3.101)
 - **Planned days never tick habits early.** Whole-foods and Fasting auto-checks now ignore future dates; a catch-up check runs on load and on every log change, so a day planned in advance is ticked the moment it becomes today (if its entries still meet the rule). Never auto-unchecks.
 
