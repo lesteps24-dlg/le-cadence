@@ -109,7 +109,7 @@ const { useState, useEffect, useRef } = React;
     const SUPABASE_ANON  = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNsd2xuYnp4cmFpYXZwY2pidml5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQyMzg5NjksImV4cCI6MjA4OTgxNDk2OX0.-r80YRrZG2us0kQwFpo0IKbmYX45VsF8TFFnYPT3qsM";
     const TABLE         = "quick_log";
     const USER_KEY      = "linda";
-    const APP_VERSION   = "v7.77 · 2026-09-28";
+    const APP_VERSION   = "v7.78 · 2026-09-29";
     const TIME_ANALYZE_URL = "https://le-cadence-analyze.lesteps24.workers.dev/";
     const IDLE_GOAL_HRS = 1;   // target: no more than 1 hour of idle / TV per day
     const SESSION_TYPES = ["Study", "Class", "Quiz/Test", "Project", "Other"];
@@ -13731,7 +13731,7 @@ const PracticeApp = (function () {
 const TodayApp = (function () {
   const { useState, useEffect, useRef } = React;
   const sb = (typeof window !== "undefined" && window.__SB) ? window.__SB : null;
-  const APP_VERSION = "v1.13 · 2026-09-28";
+  const APP_VERSION = "v1.14 · 2026-09-29";
   const RUN_FROM = "2026-09-28";        // the run counts from this day — Linda's reset for Sept 28
   const STUDY_TARGET_MIN = 120;         // 2 h/day is the bar; 3 h is the stretch shown in the detail
   const STUDY_STRETCH_MIN = 180;
@@ -13832,8 +13832,8 @@ const TodayApp = (function () {
   }
 
   /* ---- the routine, as steps. `core` steps make up the daily run. ---- */
-  function steps(ds, f, skipped) {
-    const sk = skipped || [];
+  function steps(ds, f, skipped, marked) {
+    const sk = skipped || []; const mk = marked || [];
     const sunday = dowOf(ds) === 0;
     const planTxt = f.plan === "rest" ? "Rest day" : f.plan === "both" ? "Lift + cardio" : f.plan === "lift" ? "Lift" : "Cardio";
     const S = [];
@@ -13886,6 +13886,8 @@ const TodayApp = (function () {
       detail: labAge == null ? "no labs logged · due" : labAge <= 90 ? `last ${f.lastLab} · next by ${addDays(f.lastLab, 90)}` : `last ${f.lastLab} · ${labAge - 90} d overdue`, go: ["health", "labs"] });
     // a skipped step reads as done for the run but is drawn as skipped, never as ✓
     S.forEach((st) => { if (sk.includes(st.id) && !st.done) { st.skipped = true; st.done = true; st.detail = "skipped today"; } });
+    // v1.14 — a past day can be marked done by hand (today_state.done) when the entry was never logged; drawn as ✓ with "marked done"
+    S.forEach((st) => { if (mk.includes(st.id) && !st.done) { st.marked = true; st.done = true; st.detail = "marked done by hand"; } });
     return S;
   }
 
@@ -13908,9 +13910,9 @@ const TodayApp = (function () {
 
   /* the run: consecutive days (ending today or yesterday) where every core step was met — derived, never stored */
   const TODAY_TABLE = "today_state";   // own row; skips live here (SQL in CHANGELOG v7.62). Falls back to this browser if the table is missing.
-  function runLength(hd, ql, mu, skips, wo) {
+  function runLength(hd, ql, mu, skips, wo, done) {
     const t = todayStr();
-    const coreOk = (ds) => steps(ds, facts(ds, hd, ql, mu, wo), (skips || {})[ds]).filter((s) => s.core).every((s) => s.done);
+    const coreOk = (ds) => steps(ds, facts(ds, hd, ql, mu, wo), (skips || {})[ds], (done || {})[ds]).filter((s) => s.core).every((s) => s.done);
     let n = 0, cur = coreOk(t) ? t : addDays(t, -1);
     if (cur < RUN_FROM || !coreOk(cur)) return 0;
     while (cur >= RUN_FROM && coreOk(cur) && n < 400) { n++; cur = addDays(cur, -1); }
@@ -13945,6 +13947,13 @@ const TodayApp = (function () {
       Object.keys(next.skips).sort().slice(0, -60).forEach((old) => delete next.skips[old]);
       return saveT(next, day.includes(id) ? "Un-skipped" : "Skipped today");
     };
+    const toggleDone = (ds, id) => {
+      const cur = tstate || {}; const day = (cur.done || {})[ds] || [];
+      const nextDay = day.includes(id) ? day.filter((x) => x !== id) : [...day, id];
+      const next = { ...cur, done: { ...(cur.done || {}), [ds]: nextDay } };
+      Object.keys(next.done).sort().slice(0, -60).forEach((old) => delete next.done[old]);
+      return saveT(next, day.includes(id) ? "Unmarked" : "Marked done");
+    };
     /* v1.8 — Three things: the day's three priorities, typed by hand, ticked by hand. Stored per day in today_state.three. */
     // v1.10 — three slots by default; when every filled slot is done, a bonus slot appears (up to 5). Never more than five.
     const THREE_MAX = 10;   // three by default; bonus lines appear one at a time once everything filled is done, up to this
@@ -13955,6 +13964,7 @@ const TodayApp = (function () {
     const setCardioMin = (ds, min) => { const cur = tstate || {}; const wo = { ...(cur.wo || {}) }; if (min > 0) wo[ds] = { ...(wo[ds] || {}), cardio: min }; else if (wo[ds]) { delete wo[ds].cardio; if (!Object.keys(wo[ds]).length) delete wo[ds]; } Object.keys(wo).sort().slice(0, -60).forEach((old) => delete wo[old]); return saveT({ ...cur, wo }, min > 0 ? `${min} cardio min logged` : "Cardio minutes cleared"); };
     const [signedIn, setSignedIn] = useState(true);
     const [histOpen, setHistOpen] = useState(false);
+    const [viewYday, setViewYday] = useState(false);   // v1.14 — look at (and fix) yesterday
     useEffect(() => { if (!sb) return; sb.auth.getSession().then(({ data }) => setSignedIn(!!(data && data.session))).catch(() => {}); const { data: sub } = sb.auth.onAuthStateChange((_e, sess) => { setSignedIn(!!sess); if (sess) load(); }); return () => { try { sub.subscription.unsubscribe(); } catch (e) {} }; }, []);
     const [err, setErr] = useState("");
     const [, tick] = useState(0);
@@ -13995,36 +14005,40 @@ const TodayApp = (function () {
     );
     if (!hd || !ql) return <div style={{ maxWidth: 480, margin: "0 auto", padding: "60px 18px", textAlign: "center", fontFamily: mono, fontSize: 12, letterSpacing: 1, color: C.soft }}>{err || "reading today…"}</div>;
 
-    const ds = todayStr();
+    const ds = viewYday ? addDays(todayStr(), -1) : todayStr();
+    const isToday = ds === todayStr();
     const skips = (tstate && tstate.skips) || {};
+    const doneMap = (tstate && tstate.done) || {};
     const wo = (tstate && tstate.wo) || {};
     const f = facts(ds, hd, ql, mu, wo);
-    const S = steps(ds, f, skips[ds]);
+    const S = steps(ds, f, skips[ds], doneMap[ds]);
     const doneAll = S.filter((s) => s.done).length;
     const leftReq = S.filter((s) => !s.done && !s.optional).length;
     const leftOpt = S.filter((s) => !s.done && s.optional).length;
     const coreLeft = S.filter((s) => s.core && !s.done);
-    const run = runLength(hd, ql, mu, skips, wo);
+    const run = runLength(hd, ql, mu, skips, wo, doneMap);
     const wk = weekStats(ds, hd, wo);
     const next = S.find((s) => !s.done && !s.optional) || S.find((s) => !s.done);
     const ORDER = ["Morning", "Noon", "Afternoon", "Evening", "Sunday", "Periodic"];
     const blocks = ORDER.filter((b) => S.some((s) => s.block === b));
     const hour = new Date().getHours();
-    const nowBlock = hour < 11 ? "Morning" : hour < 14 ? "Noon" : hour < 17 ? "Afternoon" : "Evening";
+    const nowBlock = !isToday ? null : hour < 11 ? "Morning" : hour < 14 ? "Noon" : hour < 17 ? "Afternoon" : "Evening";
 
     const card = { background: C.paper, border: `1px solid ${C.line}`, borderRadius: 14, padding: "14px 14px", marginBottom: 12 };
     return (
       <div style={{ maxWidth: 480, margin: "0 auto", padding: "10px 16px 40px", fontFamily: font, color: C.ink }}>
         <div style={{ ...card, display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 10 }}>
           <div>
-            <div style={{ fontFamily: serif, fontSize: 22, lineHeight: 1.1 }}>{DOW[dowOf(ds)]}</div>
+            <div style={{ fontFamily: serif, fontSize: 22, lineHeight: 1.1 }}>{isToday ? DOW[dowOf(ds)] : "Yesterday · " + DOW[dowOf(ds)].slice(0, 3)}</div>
             <div style={{ fontFamily: mono, fontSize: 11, color: C.soft, marginTop: 4 }}>{doneAll} done · {leftReq} to go{leftOpt ? ` (+${leftOpt} optional)` : ""}{run ? ` · ${run}-day run` : ""}</div>
           </div>
           <div style={{ textAlign: "right", fontFamily: mono, fontSize: 10.5, color: C.soft, lineHeight: 1.5 }}>
             <div>{f.plan === "rest" ? "Rest day" : f.plan === "both" ? "Lift + cardio" : f.plan === "lift" ? "Lift day" : "Cardio day"}</div>
             <div>{f.steps != null ? f.steps.toLocaleString() + " steps" : "steps: waiting"}</div>
+            <button onClick={() => setViewYday((v) => !v)} style={{ marginTop: 4, background: isToday ? "transparent" : C.ink, color: isToday ? C.soft : C.paper, border: `1px solid ${isToday ? C.line : C.ink}`, borderRadius: 999, fontFamily: mono, fontSize: 9.5, padding: "3px 9px", cursor: "pointer" }}>{isToday ? "◂ yesterday" : "today ▸"}</button>
           </div>
         </div>
+        {!isToday ? <div style={{ fontFamily: mono, fontSize: 10.5, color: C.soft, margin: "-4px 0 12px", lineHeight: 1.5 }}>Fixing yesterday: ticks still come from entries — change the entry where it has a date (Nutrition, Study log, Steps…). For anything you did but never logged, use <b>mark done</b>; it counts for the run and is labelled as by hand.</div> : null}
 
         {TODAY_LINKS.length ? (
           <div style={{ display: "flex", flexWrap: "wrap", gap: 6, margin: "-4px 0 12px" }}>
@@ -14033,7 +14047,7 @@ const TodayApp = (function () {
             ))}
           </div>
         ) : null}
-        {next && (
+        {next && isToday && (
           <button onClick={() => go(next.go)} style={{ ...card, width: "100%", textAlign: "left", cursor: "pointer", borderColor: C.ink, display: "flex", alignItems: "center", gap: 10 }}>
             <span style={{ fontFamily: mono, fontSize: 9.5, letterSpacing: 1.2, textTransform: "uppercase", color: C.soft }}>Next</span>
             <span style={{ flex: 1, fontSize: 15, fontWeight: 700 }}>{next.label}</span>
@@ -14135,9 +14149,10 @@ const TodayApp = (function () {
                       {s.detail ? <span style={{ display: "block", fontFamily: mono, fontSize: 10, color: s.skipped ? C.soft : s.done ? C.sage : C.soft, marginTop: 2 }}>{s.detail}</span> : null}
                     </span>
                   </button>
-                  {(!s.done || s.skipped) && b !== "Periodic" ? (
-                    <button onClick={(e) => { e.stopPropagation(); toggleSkip(ds, s.id); }} title={s.skipped ? "Un-skip" : "Doesn't apply today — skip without breaking the run"} style={{ flexShrink: 0, alignSelf: "center", background: "transparent", border: `1px solid ${C.line}`, borderRadius: 999, color: C.soft, fontFamily: mono, fontSize: 9.5, padding: "3px 8px", cursor: "pointer" }}>{s.skipped ? "↺ undo" : "skip"}</button>
-                  ) : null}
+                  {(!s.done || s.skipped || s.marked) && b !== "Periodic" ? (<>
+                    {!isToday && !s.skipped ? <button onClick={(e) => { e.stopPropagation(); toggleDone(ds, s.id); }} title={s.marked ? "Unmark" : "Did it, never logged it"} style={{ flexShrink: 0, alignSelf: "center", marginRight: 4, background: s.marked ? C.sage : "transparent", border: `1px solid ${s.marked ? C.sage : C.line}`, borderRadius: 999, color: s.marked ? C.paper : C.soft, fontFamily: mono, fontSize: 9.5, padding: "3px 8px", cursor: "pointer" }}>{s.marked ? "✓ marked" : "mark done"}</button> : null}
+                    {!s.marked ? <button onClick={(e) => { e.stopPropagation(); toggleSkip(ds, s.id); }} title={s.skipped ? "Un-skip" : "Doesn't apply today — skip without breaking the run"} style={{ flexShrink: 0, alignSelf: "center", background: "transparent", border: `1px solid ${C.line}`, borderRadius: 999, color: C.soft, fontFamily: mono, fontSize: 9.5, padding: "3px 8px", cursor: "pointer" }}>{s.skipped ? "↺ undo" : "skip"}</button> : null}
+                  </>) : null}
                 </div>
               ))}
             </div>
@@ -14151,9 +14166,9 @@ const TodayApp = (function () {
           const earliest = Object.keys(three).sort()[0] || RUN_FROM;
           const floor = earliest < RUN_FROM ? earliest : RUN_FROM;
           for (let i = 1; i <= 30; i++) {
-            const d = addDays(ds, -i); if (d < floor) break;
+            const d = addDays(todayStr(), -i); if (d < floor) break;
             const list = (three[d] || []).filter((x) => x && x.t && x.t.trim());
-            const core = steps(d, facts(d, hd, ql, mu, wo), skips[d]).filter((s) => s.core);
+            const core = steps(d, facts(d, hd, ql, mu, wo), skips[d], doneMap[d]).filter((s) => s.core);
             const met = core.filter((s) => s.done).length;
             rows.push({ d, list, met, total: core.length });
           }
