@@ -4,7 +4,13 @@ Shell version is `APP_VERSION` near the top of `index.html` (inside QuickLogApp)
 `APP_VERSION`: Health, Muse, Streaks (ConsistencyApp), Practice. Bump the shell on every deploy; bump an app's
 version only when that app changed.
 
-## v7.76 — 2026-09-28 (Health v3.104 · Today v1.13)
+## v7.77 — 2026-09-28 (Health v3.105)
+- **Apple Watch steps** — new source (Health → Sources → Apple Watch) and new Worker `workers/apple-sync.js`. Apple Health has no cloud API, so an iPhone Shortcut automation pushes the day's Watch steps to the Worker (KV-backed, secret-keyed) at 11:45 PM; the app pulls it like every other source, auto-syncing when stale. Set-up steps (Cloudflare: Worker + KV namespace `APPLE_SYNC` bound as `APPLE_KV` + secret `APPLE_KEY`; iPhone: a 5-action Shortcut) are on the tab and in the Worker header.
+- **Steps rule is now typed › Apple Watch › Oura ring › Withings.** Yesterday's check: Watch 5,872 · Withings "imported" 6,799 (Apple Health plus the phone's samples — over-counts) · Oura 4,844 (ring under-counts). Neither proxy matched, so the Watch itself is the reference. A day with no Watch push falls back to the ring.
+- Sources card gains a Watch column.
+- Tab icons: ❤ / ☀ / ⏱ now carry the emoji selector (❤️ ☀️ ⏱️) so they render the same on Windows as on iPhone (Windows was drawing them as plain text glyphs).
+
+2026-09-28 (Health v3.104 · Today v1.13)
 - **Steps now come from Oura first.** Withings steps come from the phone's motion sensor via the Withings app (formerly Health Mate), so they undercount whenever the phone isn't carried; the ring is worn all day. One shared rule (`window.__lcStepsBy`) now feeds every screen — the Steps habit auto-check, the habit detail, the Week card, the Steps tab, Insights and Today: **typed correction > Oura ring > Withings**. Withings only fills a day Oura has no count for.
 - **Steps tab → Sources · last 7 days**: Oura, Withings and the count in use side by side, bold = used, ✎ = typed. The dial and Today's walk step name the source ("from Oura").
 - **withings-sync Worker v5** (`workers/withings-sync.js` — paste into Cloudflare and Deploy): each day keeps `stepsSources` (brand / is_tracker / device per row) and `steps` is the **max** across devices instead of the last row. The Sources card shows what recorded each Withings count — phone, imported (Apple Health), or a Withings tracker — so you can see whether Withings is already carrying Apple Watch steps. Shows "?" until the Worker is updated and synced.

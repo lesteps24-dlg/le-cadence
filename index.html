@@ -61,7 +61,8 @@ window.__lcSave = async function (sb, table, id, state, expected) {
   throw insErr;
 };
 /* small toast so a conflict reload is visible, whatever tab is open */
-// v7.76 — one steps-per-day rule for every screen: manual override > Oura ring > Withings app (phone motion; the app was called Health Mate until 2024).
+// v7.77 — one steps-per-day rule for every screen: manual override > Apple Watch (pushed by the Shortcut) > Oura ring > Withings app.
+// Withings' "imported" count is Apple Health with the phone's samples added on top (over-counts); the ring under-counts. The Watch is the reference.
 // Returns { [day]: { steps, src } } with src "entered" | "Oura" | "Withings".
 // What recorded a Withings step count. Needs withings-sync v5 (stepsSources); older syncs show "?" until re-synced.
 // brand 1 = Withings device; is_tracker false = the count came from the phone or an imported source (e.g. Apple Health).
@@ -76,6 +77,7 @@ window.__lcStepsBy = function (hd) {
   hd = hd || {}; const m = {};
   ((hd.withings && hd.withings.days) || []).forEach((d) => { if (d && d.day && d.steps != null) m[d.day] = { steps: Number(d.steps), src: "Withings", via: window.__lcWithingsVia(d) }; });
   ((hd.oura && hd.oura.days) || []).forEach((d) => { if (d && d.day && d.ouraSteps != null && Number(d.ouraSteps) > 0) m[d.day] = { steps: Number(d.ouraSteps), src: "Oura" }; });
+  ((hd.apple && hd.apple.days) || []).forEach((d) => { if (d && d.day && d.steps != null && Number(d.steps) > 0) m[d.day] = { steps: Number(d.steps), src: "Apple Watch" }; });   // v7.77 — the Watch itself beats both
   const ov = hd.stepsOverride || {}; Object.keys(ov).forEach((d) => { if (ov[d] != null) m[d] = { steps: Number(ov[d]), src: "entered" }; });
   return m;
 };
@@ -107,7 +109,7 @@ const { useState, useEffect, useRef } = React;
     const SUPABASE_ANON  = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNsd2xuYnp4cmFpYXZwY2pidml5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQyMzg5NjksImV4cCI6MjA4OTgxNDk2OX0.-r80YRrZG2us0kQwFpo0IKbmYX45VsF8TFFnYPT3qsM";
     const TABLE         = "quick_log";
     const USER_KEY      = "linda";
-    const APP_VERSION   = "v7.76 · 2026-09-28";
+    const APP_VERSION   = "v7.77 · 2026-09-28";
     const TIME_ANALYZE_URL = "https://le-cadence-analyze.lesteps24.workers.dev/";
     const IDLE_GOAL_HRS = 1;   // target: no more than 1 hour of idle / TV per day
     const SESSION_TYPES = ["Study", "Class", "Quiz/Test", "Project", "Other"];
@@ -5400,7 +5402,7 @@ const { useState, useEffect, useRef } = React;
     const TABLE         = "hundred_days";
     const USER_KEY      = "linda";              // any fixed label; names your single saved row
     const ANALYZE_URL   = "https://hundred-days-analyze.lesteps24.workers.dev/";                   // your trends Worker
-    const APP_VERSION   = "v3.104 · 2026-09-28";  // bump this each update so you can confirm a deploy
+    const APP_VERSION   = "v3.105 · 2026-09-28";  // bump this each update so you can confirm a deploy
     const DEMO_URL      = "https://www.instagram.com/reel/DWACMUODNN1/";  // Movement routine demo
     /* ============================================================ */
 
@@ -5521,7 +5523,7 @@ const { useState, useEffect, useRef } = React;
       [["morning", "Movement"], ["steps", "Steps"], ["reset", "Reset"], ["invis", "Invisalign"]],
       [["progress", "Progress"], ["beforeafter", "Metrics"], ["labs", "Labs"], ["notes", "Notes"], ["sources", "Sources"]],
     ];
-    const HEALTH_SOURCES = [["withings", "Withings"], ["oura", "Oura"], ["whoop", "Whoop"], ["strava", "Strava"]];
+    const HEALTH_SOURCES = [["withings", "Withings"], ["oura", "Oura"], ["apple", "Apple Watch"], ["whoop", "Whoop"], ["strava", "Strava"]];
     const HEALTH_ALL_TABS = [...HEALTH_TAB_ROWS.flat().filter(([k]) => k !== "sources" && k !== "today"), ...HEALTH_SOURCES];
     // Editable in Settings → Water quick-add (stored as state.waterPresets). Decimals allowed.
     const DEFAULT_DRINK_PRESETS = [{ name: "Unsweet tea", oz: 16, sugar: false, emoji: "🍵" }];
@@ -5624,6 +5626,7 @@ const { useState, useEffect, useRef } = React;
       oura: { url: "", days: [], lastSync: 0 },   // Oura ring sync (sleep / HRV / RHR / readiness)
       withings: { url: "", days: [], lastSync: 0 },   // Withings sync (weight / body-fat / BP)
       whoop: { url: "", days: [], lastSync: 0 },   // Whoop sync — fallback sleep source + recovery + strain
+      apple: { url: "", days: [], lastSync: 0 },   // v3.105 — Apple Watch steps, pushed by an iPhone Shortcut to the apple-sync Worker
       strava: { url: "", workouts: [], lastSync: 0 },   // Strava sync (Peloton auto-posts here) — auto-checks Resistance / Cardio / Deep breathing
       workoutPlan: { ...DEFAULT_WORKOUT_PLAN },          // weekday schedule: Mon/Wed/Fri lift · Tue/Thu/Sat/Sun cardio
       labs: [],                                          // [{ date, source, fasting, note, values: { a1c, ldl, … } }]
@@ -5766,6 +5769,7 @@ const { useState, useEffect, useRef } = React;
       if (typeof merged.waterDesc !== "string") merged.waterDesc = def.waterDesc;
       if (!merged.waterLog || typeof merged.waterLog !== "object") merged.waterLog = {};
       if (!merged.oura || typeof merged.oura !== "object") merged.oura = { url: "", days: [], lastSync: 0 };
+      if (!merged.apple || typeof merged.apple !== "object") merged.apple = { url: "", days: [], lastSync: 0 };
       if (typeof merged.oura.url !== "string") merged.oura.url = "";
       if (!Array.isArray(merged.oura.days)) merged.oura.days = [];
       if (typeof merged.oura.lastSync !== "number") merged.oura.lastSync = 0;
@@ -5829,6 +5833,19 @@ const { useState, useEffect, useRef } = React;
       useEffect(() => { if (state && (state.hiddenViews || []).includes(view)) setView("today"); }, [state && state.hiddenViews, view]);
       const [ouraSyncing, setOuraSyncing] = useState(false);
       const [ouraMsg, setOuraMsg] = useState("");
+      const [appleSyncing, setAppleSyncing] = useState(false);
+      const [appleMsg, setAppleMsg] = useState("");
+      const setAppleUrl = (u) => setState((s) => ({ ...s, apple: { ...(s.apple || {}), url: u } }));
+      const syncApple = async () => {
+        const url = ((state.apple && state.apple.url) || "").trim(); if (!url) return;
+        setAppleSyncing(true); setAppleMsg("");
+        try {
+          const r = await fetch(url.replace(/\/+$/, "") + "?days=120"); const j = await r.json();
+          if (j && Array.isArray(j.days)) { setState((s) => ({ ...s, apple: { ...(s.apple || {}), days: j.days.slice().sort((a, b) => (a.day < b.day ? 1 : -1)), lastSync: Date.now() } })); try { window.dispatchEvent(new CustomEvent("lc:deviceSynced", { detail: "apple" })); } catch (e2) {} setAppleMsg(`Synced ${j.days.length} day${j.days.length === 1 ? "" : "s"} ✓`); }
+          else setAppleMsg(j && j.error ? j.error : "No data returned");
+        } catch (e) { setAppleMsg("Couldn't reach the sync URL"); }
+        setAppleSyncing(false);
+      };
       const [ouraRange, setOuraRange] = useState(14);
       const setOuraUrl = (u) => setState((s) => ({ ...s, oura: { ...(s.oura || {}), url: u } }));
       const [whoopSyncing, setWhoopSyncing] = useState(false);
@@ -6347,6 +6364,7 @@ const { useState, useEffect, useRef } = React;
           autoSyncRef.current = Date.now();
           try {
             if (stale(state.oura)) syncOura();
+            if (stale(state.apple)) syncApple();
             if (stale(state.withings)) syncWithings();
             if (stale(state.whoop)) syncWhoop();
             if (stale(state.strava)) syncStrava();
@@ -8579,6 +8597,7 @@ const { useState, useEffect, useRef } = React;
             const _byDay = {};
             ((state.withings && state.withings.days) || []).forEach((d) => { if (d.steps != null) _byDay[d.day] = { ...d, _wSteps: d.steps }; });
             ((state.oura && state.oura.days) || []).forEach((d) => { if (d.ouraSteps != null) _byDay[d.day] = { ...(_byDay[d.day] || { day: d.day }), _oSteps: d.ouraSteps }; });
+            ((state.apple && state.apple.days) || []).forEach((d) => { if (d.steps != null) _byDay[d.day] = { ...(_byDay[d.day] || { day: d.day }), _aSteps: d.steps }; });
             const _sb = window.__lcStepsBy(state);   // v7.76 — override > Oura > Withings; each row keeps both raw counts for the breakdown
             Object.keys(_sb).forEach((day) => { _byDay[day] = { ...(_byDay[day] || { day }), steps: _sb[day].steps, _src: _sb[day].src, _ov: _sb[day].src === "entered" }; });
             const all = Object.values(_byDay).filter((d) => d.steps != null);
@@ -8605,7 +8624,7 @@ const { useState, useEffect, useRef } = React;
                     <span style={{ fontFamily: "'DM Mono', monospace", fontSize: 11, color: C.soft }}>goal {goal.toLocaleString()}/day</span>
                   </div>
                   {days.length === 0 ? (
-                    <p style={{ fontFamily: "'Hanken Grotesk', sans-serif", fontSize: 13, color: C.soft, margin: "10px 0 0", lineHeight: 1.5 }}>No step data yet. Steps come from the Oura sync (Withings as a fallback, and anything you type below wins over both).</p>
+                    <p style={{ fontFamily: "'Hanken Grotesk', sans-serif", fontSize: 13, color: C.soft, margin: "10px 0 0", lineHeight: 1.5 }}>No step data yet. Steps come from the Apple Watch push (Sources → Apple Watch), then the Oura sync, then Withings; anything you type below wins over all.</p>
                   ) : (
                     <>
                       <div style={{ display: "flex", justifyContent: "center", marginTop: 14 }}>
@@ -8657,29 +8676,81 @@ const { useState, useEffect, useRef } = React;
                       <span style={{ fontFamily: "'DM Mono', monospace", fontSize: 9, color: C.navy }}>– – goal {goal.toLocaleString()}</span>
                       <span style={{ fontFamily: "'DM Mono', monospace", fontSize: 9, color: C.faint }}>{(recent[recent.length - 1].day || "").slice(5)}</span>
                     </div>
-                    <p style={{ fontFamily: "'Hanken Grotesk', sans-serif", fontSize: 11, color: C.soft, margin: "10px 0 0", lineHeight: 1.45 }}>Oura first, Withings when Oura has no count, typed corrections over both. Green bars cleared {goal.toLocaleString()}.</p>
+                    <p style={{ fontFamily: "'Hanken Grotesk', sans-serif", fontSize: 11, color: C.soft, margin: "10px 0 0", lineHeight: 1.45 }}>Apple Watch first, the ring on days the Watch didn't push, Withings last; typed corrections over all. Green bars cleared {goal.toLocaleString()}.</p>
                   </div>
                 )}
                 {/* v7.76 — where each day's number came from, so a wrong count can be traced */}
                 <div style={{ ...card, marginTop: 12 }}>
                   <p style={miniLabel}>SOURCES · LAST 7 DAYS</p>
-                  <div style={{ display: "grid", gridTemplateColumns: "1fr auto auto auto", gap: "4px 14px", fontFamily: "'DM Mono', monospace", fontSize: 11, marginTop: 6 }}>
-                    <span style={{ color: C.faint }}></span><span style={{ color: C.faint, textAlign: "right" }}>Oura</span><span style={{ color: C.faint, textAlign: "right" }}>Withings</span><span style={{ color: C.faint, textAlign: "right" }}>used</span>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr auto auto auto auto", gap: "4px 12px", fontFamily: "'DM Mono', monospace", fontSize: 11, marginTop: 6 }}>
+                    <span style={{ color: C.faint }}></span><span style={{ color: C.faint, textAlign: "right" }}>Watch</span><span style={{ color: C.faint, textAlign: "right" }}>Oura</span><span style={{ color: C.faint, textAlign: "right" }}>Withings</span><span style={{ color: C.faint, textAlign: "right" }}>used</span>
                     {Array.from({ length: 7 }, (_, i) => addDays(today, -i)).map((d) => { const r = _byDay[d] || {}; const cell = (v, on) => <span style={{ textAlign: "right", color: on ? C.ink : C.faint, fontWeight: on ? 700 : 400 }}>{v != null ? Number(v).toLocaleString() : "—"}</span>; return (
                       <React.Fragment key={d}>
                         <span style={{ color: d === today ? C.ink : C.soft }}>{d === today ? "Today" : prettyDate(d)}</span>
-                        {cell(r._oSteps, r._src === "Oura")}<span style={{ textAlign: "right", color: r._src === "Withings" ? C.ink : C.faint, fontWeight: r._src === "Withings" ? 700 : 400 }}>{r._wSteps != null ? Number(r._wSteps).toLocaleString() : "—"}{r._wSteps != null ? <span style={{ display: "block", fontSize: 9, fontWeight: 400, color: C.faint }}>{window.__lcWithingsVia(r)}</span> : null}</span>
+                        {cell(r._aSteps, r._src === "Apple Watch")}{cell(r._oSteps, r._src === "Oura")}<span style={{ textAlign: "right", color: r._src === "Withings" ? C.ink : C.faint, fontWeight: r._src === "Withings" ? 700 : 400 }}>{r._wSteps != null ? Number(r._wSteps).toLocaleString() : "—"}{r._wSteps != null ? <span style={{ display: "block", fontSize: 10, fontWeight: 600, color: C.soft }}>{window.__lcWithingsVia(r)}</span> : null}</span>
                         <span style={{ textAlign: "right", color: r._src === "entered" ? C.ember : C.sage }}>{r.steps != null ? Number(r.steps).toLocaleString() : "—"}{r._src === "entered" ? " ✎" : ""}</span>
                       </React.Fragment>
                     ); })}
                   </div>
-                  <p style={{ fontFamily: "'Hanken Grotesk', sans-serif", fontSize: 11, color: C.soft, margin: "10px 0 0", lineHeight: 1.45 }}>Bold is the count in use. Under each Withings count: what recorded it — "phone" (Withings app motion tracking), "imported" (Withings read it from another app, e.g. Apple Health / Apple Watch), or a Withings tracker. "?" means the Worker hasn't been updated to v5 yet — paste workers/withings-sync.js and re-sync. Oura is the ring. Withings only fills in when Oura has nothing for that day. ✎ = typed in Correct steps.</p>
+                  <p style={{ fontFamily: "'Hanken Grotesk', sans-serif", fontSize: 11, color: C.soft, margin: "10px 0 0", lineHeight: 1.45 }}>Bold is the count in use: Watch (pushed nightly by your iPhone Shortcut) › Oura ring › Withings. Under each Withings count: what recorded it — "imported" is Apple Health with the phone's samples added on top, which over-counts; "phone" is the Withings app's own motion tracking. A day with no Watch push falls back to the ring. ✎ = typed in Correct steps, wins over everything.</p>
                 </div>
               </>
             );
           })()}
 
           {/* NOTES */}
+          {/* v3.105 — Apple Watch: the iPhone pushes a daily step total to the apple-sync Worker; this tab pulls it */}
+          {view === "apple" && (() => {
+            const a = state.apple || { url: "", days: [], lastSync: 0 };
+            const days = (a.days || []).slice(0, 14);
+            const cell = { fontFamily: "'DM Mono', monospace", fontSize: 12.5, color: C.ink, textAlign: "right" };
+            const hd = { fontFamily: "'DM Mono', monospace", fontSize: 9.5, letterSpacing: 0.5, color: C.soft, textAlign: "right" };
+            const step = (n, t) => <div style={{ display: "flex", gap: 8, padding: "5px 0", borderTop: `1px solid ${C.bg}` }}><span style={{ fontFamily: "'DM Mono', monospace", fontSize: 11, color: C.soft, width: 16, flexShrink: 0 }}>{n}</span><span style={{ fontFamily: "'Hanken Grotesk', sans-serif", fontSize: 12.5, color: C.ink, lineHeight: 1.4 }}>{t}</span></div>;
+            return (
+              <>
+                <div style={card}>
+                  <h2 style={h2}>⌚ Apple Watch</h2>
+                  <p style={{ fontFamily: "'Hanken Grotesk', sans-serif", fontSize: 13, color: C.soft, margin: "2px 0 12px", lineHeight: 1.45 }}>Apple Health has no cloud API, so your iPhone pushes the day's Watch steps to a small Worker and Cadence reads them here. The Watch count is the reference — it wins over the ring and Withings on any day it arrives.</p>
+                  <p style={miniLabel}>SYNC URL</p>
+                  <input value={a.url} onChange={(e) => setAppleUrl(e.target.value)} placeholder="https://apple-sync.you.workers.dev" style={input} />
+                  <button onClick={syncApple} disabled={appleSyncing || !a.url.trim()} style={{ ...tabBtn(true), width: "100%", padding: "12px", marginTop: 8, background: (appleSyncing || !a.url.trim()) ? C.faint : C.sage, cursor: (appleSyncing || !a.url.trim()) ? "default" : "pointer" }}>{appleSyncing ? "Syncing…" : "Sync now"}</button>
+                  {(a.lastSync || appleMsg) ? <p style={{ fontFamily: "'DM Mono', monospace", fontSize: 11, color: C.soft, margin: "8px 0 0" }}>{appleMsg || ("Last synced " + new Date(a.lastSync).toLocaleString())}</p> : null}
+                </div>
+                {days.length > 0 ? (
+                  <div style={card}>
+                    <p style={miniLabel}>PUSHED DAYS</p>
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr auto auto", gap: 4, alignItems: "center" }}>
+                      <span style={{ ...hd, textAlign: "left" }}>DAY</span><span style={hd}>STEPS</span><span style={hd}>PUSHED AT</span>
+                      {days.map((d) => (
+                        <React.Fragment key={d.day}>
+                          <span style={{ ...cell, textAlign: "left", color: C.soft, fontSize: 11 }}>{(d.day || "").slice(5)}</span>
+                          <span style={cell}>{d.steps != null ? Number(d.steps).toLocaleString() : "—"}</span>
+                          <span style={{ ...cell, fontSize: 10.5, color: C.soft }}>{d.at ? new Date(d.at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : "—"}</span>
+                        </React.Fragment>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
+                <div style={card}>
+                  <p style={miniLabel}>SET-UP · ONCE</p>
+                  <p style={{ fontFamily: "'Hanken Grotesk', sans-serif", fontSize: 12.5, color: C.soft, margin: "4px 0 8px", lineHeight: 1.45 }}>Cloudflare first (the Worker source is <span style={{ fontFamily: "'DM Mono', monospace" }}>workers/apple-sync.js</span> in the repo; its header has the same steps):</p>
+                  {step("1", "Workers & Pages → Create → Worker → name it apple-sync → paste the file → Deploy.")}
+                  {step("2", "Storage & Databases → KV → Create namespace APPLE_SYNC.")}
+                  {step("3", "Worker → Settings → Bindings → Add KV namespace: variable APPLE_KV → APPLE_SYNC.")}
+                  {step("4", "Worker → Settings → Variables and Secrets → Secret APPLE_KEY = a long random string. Deploy again. Paste the Worker URL above.")}
+                  <p style={{ fontFamily: "'Hanken Grotesk', sans-serif", fontSize: 12.5, color: C.soft, margin: "12px 0 8px", lineHeight: 1.45 }}>Then the iPhone Shortcut ("Push steps to Cadence"):</p>
+                  {step("1", "Find Health Samples — Type: Steps · filter Source is your Apple Watch · Start Date is Today. (Source = Watch keeps the phone's steps out.)")}
+                  {step("2", "Calculate Statistics — Sum of Health Samples.")}
+                  {step("3", "Format Date — Current Date, custom format yyyy-MM-dd.")}
+                  {step("4", "Text — your Worker URL + /push?key=APPLE_KEY&day=[Formatted Date]&steps=[Statistics]")}
+                  {step("5", "Get Contents of URL — the Text. Run it once by hand, then tap Sync now above.")}
+                  {step("6", "Automation → Time of Day 11:45 PM · Daily · Run Immediately (Ask Before Running off) → this Shortcut. Optional second one at 6:00 AM for late-night steps.")}
+                  <p style={{ fontFamily: "'Hanken Grotesk', sans-serif", fontSize: 11.5, color: C.soft, margin: "10px 0 0", lineHeight: 1.45 }}>A day the Shortcut doesn't run falls back to the ring — nothing breaks. Tap the Shortcut any time during the day to refresh today's number.</p>
+                </div>
+              </>
+            );
+          })()}
+
           {view === "oura" && (() => {
             const o = state.oura || { url: "", days: [], lastSync: 0 };
             const days = o.days || [];
@@ -13775,7 +13846,7 @@ const TodayApp = (function () {
     const wd = (need) => `${oz} of ${g} oz` + (oz >= need ? "" : ` · ${need - oz} more for this checkpoint`);
     S.push({ block: "Morning", id: "water1", label: `Water — ${third} oz by noon`, core: false, optional: true, done: oz >= third, detail: wd(third), go: ["health", "water"] });
     S.push({ block: "Noon", id: "water2", label: `Water — ${twoThirds} oz by mid-afternoon`, core: false, optional: true, done: oz >= twoThirds, detail: wd(twoThirds), go: ["health", "water"] });
-    S.push({ block: "Afternoon", id: "walk", label: `Walk — ${f.stepsGoal.toLocaleString()} steps (today's ramp goal)`, core: true, done: f.stepsN != null && f.stepsN >= f.stepsGoal, detail: f.stepsN != null ? `${f.stepsN.toLocaleString()} of ${f.stepsGoal.toLocaleString()} · ${f.stepsOv ? "entered" : "from " + f.stepsSrc}` : "waiting for Oura steps", go: ["health", "steps"] });
+    S.push({ block: "Afternoon", id: "walk", label: `Walk — ${f.stepsGoal.toLocaleString()} steps (today's ramp goal)`, core: true, done: f.stepsN != null && f.stepsN >= f.stepsGoal, detail: f.stepsN != null ? `${f.stepsN.toLocaleString()} of ${f.stepsGoal.toLocaleString()} · ${f.stepsOv ? "entered" : "from " + f.stepsSrc}` : "waiting for steps to sync", go: ["health", "steps"] });
     S.push({ block: "Afternoon", id: "water3", label: `Water — ${g} oz goal, done before evening`, core: true, done: oz >= g, detail: wd(g), go: ["health", "water"] });
     S.push({ block: "Noon", id: "lunch", label: "Log lunch (Same as yesterday if it repeats)", core: false, optional: true, done: f.lunch, detail: f.lunch ? f.lunchTxt.slice(0, 40) : "optional", go: ["health", "nutrition"] });
     S.push({ block: "Morning", id: "fast", label: `Fast ${Math.round(f.fastGoal / 60)} h (from last night's stop time)`, core: true, done: f.fastDone, detail: f.fastMin != null ? `${Math.floor(f.fastMin / 60)}h ${f.fastMin % 60}m${f.fastDone ? "" : " · set 'started eating' when you break it"}` : "needs last night's stop time + today's start time", go: ["health", "nutrition"] });
@@ -14264,10 +14335,10 @@ function Shell() {
   return (<div>
     <div style={{ maxWidth: 480, margin: "0 auto", padding: "10px 16px 0" }}>
       <div id="lc-switch" style={{ display: "flex", flexWrap: "wrap", gap: 6, background: C.paper, border: "1px solid " + C.line, borderRadius: 13, padding: 4 }}>
-        <button onClick={() => pick("today")} style={{ ...seg(mode === "today"), flex: "1 1 100%", fontSize: 13.5 }}>☀ Today</button>
-        <button onClick={() => pick("time")} style={seg(mode === "time")}>⏱ Time</button>
+        <button onClick={() => pick("today")} style={{ ...seg(mode === "today"), flex: "1 1 100%", fontSize: 13.5 }}>☀️ Today</button>
+        <button onClick={() => pick("time")} style={seg(mode === "time")}>⏱️ Time</button>
         <button onClick={() => pick("study")} style={seg(mode === "study")}>📚 Study</button>
-        <button onClick={() => pick("health")} style={seg(mode === "health")}>❤ Health</button>
+        <button onClick={() => pick("health")} style={seg(mode === "health")}>❤️ Health</button>
         <button onClick={() => pick("muse")} style={seg(mode === "muse")}>◐ Muse</button>
         <button onClick={() => pick("streak")} style={seg(mode === "streak")}>🏆 Streaks</button>
         <button onClick={() => pick("practice")} style={seg(mode === "practice")}>🎯 Practice</button>
