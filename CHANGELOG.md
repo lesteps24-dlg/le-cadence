@@ -7,6 +7,7 @@ version only when that app changed.
 ## v7.76 — 2026-09-28 (Health v3.104 · Today v1.13)
 - **Steps now come from Oura first.** Withings steps come from the phone's motion sensor via the Withings app (formerly Health Mate), so they undercount whenever the phone isn't carried; the ring is worn all day. One shared rule (`window.__lcStepsBy`) now feeds every screen — the Steps habit auto-check, the habit detail, the Week card, the Steps tab, Insights and Today: **typed correction > Oura ring > Withings**. Withings only fills a day Oura has no count for.
 - **Steps tab → Sources · last 7 days**: Oura, Withings and the count in use side by side, bold = used, ✎ = typed. The dial and Today's walk step name the source ("from Oura").
+- **withings-sync Worker v5** (`workers/withings-sync.js` — paste into Cloudflare and Deploy): each day keeps `stepsSources` (brand / is_tracker / device per row) and `steps` is the **max** across devices instead of the last row. The Sources card shows what recorded each Withings count — phone, imported (Apple Health), or a Withings tracker — so you can see whether Withings is already carrying Apple Watch steps. Shows "?" until the Worker is updated and synced.
 - Steps tab dial now uses the ramp goal for today (it was still reading the old fixed goal, so it disagreed with Today).
 
 2026-09-28 (Health v3.103)

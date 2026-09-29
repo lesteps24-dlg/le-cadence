@@ -63,9 +63,18 @@ window.__lcSave = async function (sb, table, id, state, expected) {
 /* small toast so a conflict reload is visible, whatever tab is open */
 // v7.76 — one steps-per-day rule for every screen: manual override > Oura ring > Withings app (phone motion; the app was called Health Mate until 2024).
 // Returns { [day]: { steps, src } } with src "entered" | "Oura" | "Withings".
+// What recorded a Withings step count. Needs withings-sync v5 (stepsSources); older syncs show "?" until re-synced.
+// brand 1 = Withings device; is_tracker false = the count came from the phone or an imported source (e.g. Apple Health).
+window.__lcWithingsVia = function (d) {
+  const ss = (d && d.stepsSources) || []; if (!ss.length) return "?";
+  const best = ss.slice().sort((a, b) => (b.steps || 0) - (a.steps || 0))[0];
+  const lab = (x) => x.tracker ? (x.brand === 1 ? "Withings tracker" : "tracker") : (x.brand === 1 ? "phone" : "imported");
+  const labs = [...new Set(ss.map(lab))];
+  return lab(best) + (ss.length > 1 ? ` (+${ss.length - 1}: ${labs.filter((l) => l !== lab(best)).join(", ") || "same"})` : "");
+};
 window.__lcStepsBy = function (hd) {
   hd = hd || {}; const m = {};
-  ((hd.withings && hd.withings.days) || []).forEach((d) => { if (d && d.day && d.steps != null) m[d.day] = { steps: Number(d.steps), src: "Withings" }; });
+  ((hd.withings && hd.withings.days) || []).forEach((d) => { if (d && d.day && d.steps != null) m[d.day] = { steps: Number(d.steps), src: "Withings", via: window.__lcWithingsVia(d) }; });
   ((hd.oura && hd.oura.days) || []).forEach((d) => { if (d && d.day && d.ouraSteps != null && Number(d.ouraSteps) > 0) m[d.day] = { steps: Number(d.ouraSteps), src: "Oura" }; });
   const ov = hd.stepsOverride || {}; Object.keys(ov).forEach((d) => { if (ov[d] != null) m[d] = { steps: Number(ov[d]), src: "entered" }; });
   return m;
@@ -8659,12 +8668,12 @@ const { useState, useEffect, useRef } = React;
                     {Array.from({ length: 7 }, (_, i) => addDays(today, -i)).map((d) => { const r = _byDay[d] || {}; const cell = (v, on) => <span style={{ textAlign: "right", color: on ? C.ink : C.faint, fontWeight: on ? 700 : 400 }}>{v != null ? Number(v).toLocaleString() : "—"}</span>; return (
                       <React.Fragment key={d}>
                         <span style={{ color: d === today ? C.ink : C.soft }}>{d === today ? "Today" : prettyDate(d)}</span>
-                        {cell(r._oSteps, r._src === "Oura")}{cell(r._wSteps, r._src === "Withings")}
+                        {cell(r._oSteps, r._src === "Oura")}<span style={{ textAlign: "right", color: r._src === "Withings" ? C.ink : C.faint, fontWeight: r._src === "Withings" ? 700 : 400 }}>{r._wSteps != null ? Number(r._wSteps).toLocaleString() : "—"}{r._wSteps != null ? <span style={{ display: "block", fontSize: 9, fontWeight: 400, color: C.faint }}>{window.__lcWithingsVia(r)}</span> : null}</span>
                         <span style={{ textAlign: "right", color: r._src === "entered" ? C.ember : C.sage }}>{r.steps != null ? Number(r.steps).toLocaleString() : "—"}{r._src === "entered" ? " ✎" : ""}</span>
                       </React.Fragment>
                     ); })}
                   </div>
-                  <p style={{ fontFamily: "'Hanken Grotesk', sans-serif", fontSize: 11, color: C.soft, margin: "10px 0 0", lineHeight: 1.45 }}>Bold is the count in use. Withings counts come from the Withings app on your phone (phone motion only, unless you add a Withings watch); Oura is the ring. Withings only fills in when Oura has nothing for that day. ✎ = typed in Correct steps.</p>
+                  <p style={{ fontFamily: "'Hanken Grotesk', sans-serif", fontSize: 11, color: C.soft, margin: "10px 0 0", lineHeight: 1.45 }}>Bold is the count in use. Under each Withings count: what recorded it — "phone" (Withings app motion tracking), "imported" (Withings read it from another app, e.g. Apple Health / Apple Watch), or a Withings tracker. "?" means the Worker hasn't been updated to v5 yet — paste workers/withings-sync.js and re-sync. Oura is the ring. Withings only fills in when Oura has nothing for that day. ✎ = typed in Correct steps.</p>
                 </div>
               </>
             );
