@@ -4,7 +4,14 @@ Shell version is `APP_VERSION` near the top of `index.html` (inside QuickLogApp)
 `APP_VERSION`: Health, Muse, Streaks (ConsistencyApp), Practice. Bump the shell on every deploy; bump an app's
 version only when that app changed.
 
-## v7.78 — 2026-09-29 (Today v1.14)
+## v7.80 — 2026-10-05 (Health v3.107)
+- **Movement cues.** Each movement has a one-line cue — shown under its name in the sequence list and under the big timer while it runs. ✎ edit has a CUES section to rewrite them. Defaults are written from the move names (a best guess — correct them once to match how you do each move); a one-time fill adds a default cue only where a move has none. No pictures: there's no reliable source for what these specific moves look like, and a wrong one would be worse than text.
+
+2026-10-05 (Health v3.106)
+- **Movement routine — the real sequence.** Default movements are now 1 Lymphatic hops · 2 Body wave · 3 Arm swings · 4 Trunk twists · 5 Dead arms · 6 Golf swings · 7 March slaps · 8 Windmill · 9 Ballerina. A one-time migration replaces placeholder names ("Movement 1"…) or an empty list; names you'd already typed are left alone.
+- **Reorder in ✎ edit**: ▲ ▼ on each row, plus rename, add and ✕ as before. The sequence is now listed by name on the routine screen, and while a sequence runs the whole list shows as pills — done ones struck through, current one filled, and "up next" during rests.
+
+2026-09-29 (Today v1.14)
 - **Today → ◂ yesterday.** A pill in the header flips the whole tab to yesterday: its steps, skips and Three Things, all editable. Ticks still come from entries, so the fix for a missed tick is the dated entry (Nutrition, Study log, Correct Steps…). For something done but never logged, each undone step gets a **mark done** pill (`today_state.done[date]`) — drawn as ✓, labelled "marked done by hand", and it counts for the run and the 30-day history. Only yesterday is reachable; the Next card and the "· now" block highlight are today-only.
 
 2026-09-28 (Health v3.105)
