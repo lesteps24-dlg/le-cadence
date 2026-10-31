@@ -4,6 +4,13 @@ Shell version is `APP_VERSION` near the top of `index.html` (inside QuickLogApp)
 `APP_VERSION`: Health, Muse, Streaks (ConsistencyApp), Practice. Bump the shell on every deploy; bump an app's
 version only when that app changed.
 
+## v7.81 — 2026-10-31 (PMP)
+- **PMP exam moved to Fri Dec 11, 2026, 8:00 AM ET** (Pearson VUE rescheduling confirmation). A one-time migration moves a saved Nov 14 exam date; a date you set yourself is left alone.
+- **PMP HQ → Overview** now shows the appointment under the countdown: time, 270-minute length, test center, and the last day to change (Tue Dec 8, red inside 7 days).
+- **PMP checklist:** exam-time item resolved (8:00 AM confirmed), contact hours now point at the LinkedIn Learning path (target Sat Nov 7), plus two new items — Dec 5 go/no-go mock and PTO for Dec 11. Saved checklists are updated once; items you edited are left alone.
+- **PMP Plan weeks:** Wk5/Wk6 rewritten for the LinkedIn path; Wk8–Wk11 and the Exam week added through Dec 11 (mocks Nov 7, Nov 21, Dec 5). PMP subject due date moves to Dec 10.
+- 100-day run caption now says exam Dec 11. The PAUSE ranges for other plans still end Nov 15 — not changed.
+
 ## v7.80 — 2026-10-05 (Health v3.107)
 - **Movement cues.** Each movement has a one-line cue — shown under its name in the sequence list and under the big timer while it runs. ✎ edit has a CUES section to rewrite them. Defaults are written from the move names (a best guess — correct them once to match how you do each move); a one-time fill adds a default cue only where a move has none. No pictures: there's no reliable source for what these specific moves look like, and a wrong one would be worse than text.
 

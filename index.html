@@ -109,7 +109,7 @@ const { useState, useEffect, useRef } = React;
     const SUPABASE_ANON  = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNsd2xuYnp4cmFpYXZwY2pidml5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQyMzg5NjksImV4cCI6MjA4OTgxNDk2OX0.-r80YRrZG2us0kQwFpo0IKbmYX45VsF8TFFnYPT3qsM";
     const TABLE         = "quick_log";
     const USER_KEY      = "linda";
-    const APP_VERSION   = "v7.80 · 2026-10-05";
+    const APP_VERSION   = "v7.81 · 2026-10-31";
     const TIME_ANALYZE_URL = "https://le-cadence-analyze.lesteps24.workers.dev/";
     const IDLE_GOAL_HRS = 1;   // target: no more than 1 hour of idle / TV per day
     const SESSION_TYPES = ["Study", "Class", "Quiz/Test", "Project", "Other"];
@@ -281,6 +281,8 @@ const { useState, useEffect, useRef } = React;
       { id: "s5", n: "Section 5 · Checkpoint", lessons: 2, done: 0, ex: "Submit workbook exercises · Week 1 checkpoint" },
     ];
 
+    // Pearson VUE rescheduling confirmation, Oct 31 2026: Fri Dec 11 2026, 8:00 AM ET, 270-minute appointment.
+    const PMP_EXAM_APPT = { time: "8:00 AM ET", lengthMin: 270, location: "Pearson VUE Test Center, St. Petersburg FL · 9400 4th St N Ste 211", lastChange: "2026-12-08" };
     const PMP_APP_CHECKLIST = [
       { label: "Document qualifying projects (36-month minimum)", status: "done", note: "44 non-overlapping months across 6 sub-projects — well clear of the bar" },
       { label: "Compile supporting evidence (emails, decks, trackers)", status: "done", note: "Organized per-project in PMP_Application_Evidence.zip" },
@@ -302,6 +304,14 @@ const { useState, useEffect, useRef } = React;
       { label: "Sit one Pearson VUE-style sim in Study Hall", status: "todo", note: "At least one full-length in the VUE-style interface before Nov 14 — removes interface surprise on exam day." },
       { label: "Full-length sims — Study Hall + PMTI", status: "todo", note: "Study Hall gives 3 (180q). PMTI’s guarantee wants 4 of THEIR sims after class, but class ends Nov 12 and you test Nov 14 — that won’t fit. Use Study Hall sims for real readiness; treat the PMTI guarantee as likely lapsed." },
     ];
+    // v7.81 one-time rewrites (matched on the original labels so they also fix an already-saved checklist)
+    const PMP_EXAM_V3 = [
+      { re: /Schedule exam via Pearson VUE/i, label: "Schedule exam via Pearson VUE", status: "done", note: "Fri Dec 11, 2026 · 8:00 AM ET · 270-minute appointment · Pearson VUE St. Petersburg, 9400 4th St N Ste 211. Rescheduled from Nov 14 on Oct 31. Reg 546118087 · Eligibility 12812314E1. Gov't photo ID, name must match exactly. No personal items — phone/watch/wallet in locker. Plan to arrive 7:30 AM. Last day to change: Tue Dec 8." },
+      { re: /RESOLVE EXAM TIME/i, label: "Exam time confirmed — 8:00 AM ET", status: "done", note: "Pearson VUE rescheduling confirmation (Oct 31) shows Fri Dec 11, 2026 at 8:00 AM Eastern. Arriving >15 min late = refused admission + forfeited fee." },
+      { re: /Complete 35 contact hours/i, label: "Complete 35 contact hours — LinkedIn Learning path", status: "progress", note: "Switched from the PMTI recorded videos on Oct 31. Jabil PMP path = 32 h + 3 h supplement; LinkedIn plays up to 2×. Plan: finish by Sat Nov 7 (see PMP Plan). Save every course's completion certificate — the PMI application cites LinkedIn Learning. The PMTI boot camp Nov 9–12 stays." },
+      { re: /Sit one Pearson VUE-style sim/i, label: "Sit one Pearson VUE-style sim in Study Hall", status: "todo", note: "At least one full-length in the VUE-style interface before Dec 11 — removes interface surprise on exam day. Study Hall Plus access runs to ~Dec 6, so finish all 3 full-lengths by Dec 5." },
+      { re: /Full-length sims — Study Hall/i, label: "Full-length sims — Study Hall + PMTI", status: "todo", note: "Study Hall gives 3 (180q): Nov 7, Nov 21, Dec 5 (go/no-go). With the exam now Dec 11, PMTI's guarantee wants 4 of THEIR sims after class — class ends Nov 12, so it may fit again. Ask PMTI whether the guarantee still applies after the reschedule." },
+    ];
     const PMP_VALIDATE_URL = "https://le-cadence-pmp-validate.lesteps24.workers.dev/";  // deploy this Worker — see PMP_VALIDATE_WORKER.js
 
     const MIT_MODE = { light: { bg: "#E7EDE2", c: "#5C7150" }, moderate: { bg: "#F2E7CF", c: "#A9822F" }, surge: { bg: "#F3E0D9", c: "#A1391F" }, protected: { bg: "#E2E7F0", c: "#1E2A4A" }, break: { bg: "#ECE5D6", c: "#7A6F5E" } };
@@ -319,7 +329,7 @@ const { useState, useEffect, useRef } = React;
       { w: "Wk7",  s: "2026-10-21", e: "2026-10-27", m: "L2 · Rollout & adoption — MX IHB go-live Oct 23, expect lost evenings", t: 4, mode: "light" },
       { w: "Wk8",  s: "2026-10-28", e: "2026-11-03", m: "L2 · Capstone build — Mexico Cash Pool daily position playbook", t: 7, mode: "surge" },
       { w: "Wk9",  s: "2026-11-04", e: "2026-11-08", m: "L2 · Capstone submit — clear the deck before PMP week", t: 6, mode: "protected" },
-      { w: "SKIP", s: "2026-11-09", e: "2026-11-15", m: "SKIP WEEK — PMTI bootcamp Nov 9-12 · PMP exam Nov 14 · no AMP", t: 0, mode: "break" },
+      { w: "SKIP", s: "2026-11-09", e: "2026-11-15", m: "SKIP WEEK — PMTI bootcamp Nov 9-12 · no AMP", t: 0, mode: "break" },
       { w: "Wk10", s: "2026-11-16", e: "2026-11-22", m: "L2 · Certification exam + wrap-up", t: 5, mode: "light" },
     ];
 
@@ -335,10 +345,14 @@ const { useState, useEffect, useRef } = React;
       { w: "Wk2", s: "2026-10-05", e: "2026-10-11", m: "Treadmill: PMTI 6 h · Desk: Process (41%) sets + error log review · target 150–200 questions cumulative", t: 14, mode: "surge" },
       { w: "Wk3", s: "2026-10-12", e: "2026-10-18", m: "Treadmill: PMTI 6 h · ★ Oct 12 re-mock = reschedule gate (≥65 keep · 55–64 keep + 4 h weekends · <55 reschedule by Oct 15) · Desk: People (33%)", t: 14, mode: "surge" },
       { w: "Wk4", s: "2026-10-19", e: "2026-10-25", m: "Treadmill: PMTI 6 h · Desk: Business Environment (26%) + weakest domain from the error log", t: 14, mode: "protected" },
-      { w: "Wk5", s: "2026-10-26", e: "2026-11-01", m: "Treadmill: ★ finish 35 PMTI hrs — request the completion certificate · Desk: agile/hybrid emphasis (~60%) · ★ Nov 1 full-length", t: 14, mode: "protected" },
-      { w: "Wk6", s: "2026-11-02", e: "2026-11-08", m: "Desk: Study Hall full-lengths (Pearson VUE-style) · EVM/formulas pass · work the error log · ★ Nov 7 full-length", t: 16, mode: "surge" },
+      { w: "Wk5", s: "2026-10-26", e: "2026-11-01", m: "LinkedIn path: 23.5 course hrs Oct 31–Nov 1 at 2× (Approaches, People, start of Process) · Nov 1 AM = 60-question Study Hall baseline", t: 22, mode: "surge" },
+      { w: "Wk6", s: "2026-11-02", e: "2026-11-08", m: "LinkedIn path: finish all 35 hrs by Sat Nov 7 (evenings Mon/Tue/Thu + Sat AM) · ★ Nov 7 full-length mock 10:30–2:30 · Nov 8 review every miss by domain", t: 14, mode: "surge" },
       { w: "Wk7", s: "2026-11-09", e: "2026-11-12", m: "PMTI Boot Camp — 4 days, 8:00–5:30. Clear the calendar.", t: 38, mode: "surge" },
-      { w: "Exam", s: "2026-11-13", e: "2026-11-14", m: "Nov 13 light review + rest · Nov 14 EXAM (confirm 8:00 AM vs 1:00 PM with Pearson VUE)", t: 3, mode: "light" },
+      { w: "Wk8", s: "2026-11-13", e: "2026-11-15", m: "Post-bootcamp: daily timed Study Hall sets on the weakest domain · review every miss the same day", t: 7, mode: "protected" },
+      { w: "Wk9", s: "2026-11-16", e: "2026-11-22", m: "Study Hall daily sets · ★ Sat Nov 21 full-length #2 (8:00–12:00)", t: 12, mode: "surge" },
+      { w: "Wk10", s: "2026-11-23", e: "2026-11-29", m: "Thanksgiving week — light: ~30 min/day, error log only", t: 3.5, mode: "light" },
+      { w: "Wk11", s: "2026-11-30", e: "2026-12-06", m: "Study Hall daily sets · ★ Sat Dec 5 full-length #3 = GO/NO-GO for Dec 11 (Study Hall Plus access ends ~Dec 6)", t: 12, mode: "surge" },
+      { w: "Exam", s: "2026-12-07", e: "2026-12-11", m: "Mon–Wed light sets · Tue Dec 8 = last day to change the exam · Thu Dec 10 rest · Fri Dec 11 EXAM 8:00 AM, Pearson VUE St. Petersburg", t: 3, mode: "light" },
     ];
 
     // Strategic Communication (MasterClass, ~16h self-paced). Light touch in Sept, paused through
@@ -432,7 +446,7 @@ const { useState, useEffect, useRef } = React;
       log: {},                       // { [date]: { sessions:[...], commitments:[...], taskDone:{}, reflect:"" } }
       study: {                       // subject-tagged study sessions + goals
         subjects: [
-          { id: "su4", name: "PMP", emoji: "📋", goalHrs: 80, weeklyTarget: 8, cumGoal: 80, dueDate: "2026-11-13", weekdayTarget: 1, weekendTarget: 2 },
+          { id: "su4", name: "PMP", emoji: "📋", goalHrs: 80, weeklyTarget: 8, cumGoal: 80, dueDate: "2026-12-10", weekdayTarget: 1, weekendTarget: 2 },
           { id: "su5", name: "AMP", emoji: "⚡", goalHrs: 59, weeklyTarget: 6, cumGoal: 59, dueDate: "2026-11-22", weekdayTarget: 1, weekendTarget: 1.5 },
           { id: "su6", name: "Strategic Comm", emoji: "🎯", goalHrs: 16, weeklyTarget: 2, cumGoal: 16, dueDate: "2026-12-31", weekdayTarget: 0.5, weekendTarget: 1 },
           { id: "su7", name: "Excel Functions", emoji: "📐", goalHrs: 12, weeklyTarget: 1, cumGoal: 12, dueDate: "2026-12-13", weekdayTarget: 0.25, weekendTarget: 0.5 },
@@ -453,7 +467,7 @@ const { useState, useEffect, useRef } = React;
         pmpNotes: {},                // { [weekLabel]: text } — note per PMP plan week
         datedNotes: [],              // [{ id, subjectId, date, text }] — per-subject dated notes
         mitNotes: {},                // { [weekLabel]: text } — note per MIT cohort week
-        pmp: { examDate: "2026-11-14", qlog: [], mocks: [], errors: [] }, // PMP HQ (external tool logs + error log)
+        pmp: { examDate: "2026-12-11", appt: { ...PMP_EXAM_APPT }, qlog: [], mocks: [], errors: [] }, // PMP HQ (external tool logs + error log)
       },
     });
 
@@ -539,9 +553,9 @@ const { useState, useEffect, useRef } = React;
       if (!merged.study.pmpPlanDone || typeof merged.study.pmpPlanDone !== "object") merged.study.pmpPlanDone = {};
       if (!merged.study.ampPlanDone || typeof merged.study.ampPlanDone !== "object") merged.study.ampPlanDone = {};
       if (!merged.study.ampNotes || typeof merged.study.ampNotes !== "object") merged.study.ampNotes = {};
-      if (!merged.study.pmp || typeof merged.study.pmp !== "object") merged.study.pmp = { examDate: "2026-11-14", qlog: [], mocks: [], errors: [] };
+      if (!merged.study.pmp || typeof merged.study.pmp !== "object") merged.study.pmp = { examDate: "2026-12-11", appt: { ...PMP_EXAM_APPT }, qlog: [], mocks: [], errors: [] };
       ["qlog", "mocks", "errors"].forEach((k) => { if (!Array.isArray(merged.study.pmp[k])) merged.study.pmp[k] = []; });
-      if (!merged.study.pmp.examDate) merged.study.pmp.examDate = "2026-11-14";
+      if (!merged.study.pmp.examDate) merged.study.pmp.examDate = "2026-12-11";
       /* v6.60 one-time: exam moved to the day after the PMTI bootcamp (Nov 9-12). Only rewrites the
          superseded Oct 23 date — if you reschedule again from the UI, that choice is left alone. */
       if (["2026-10-23", "2026-11-13"].includes(merged.study.pmp.examDate)) merged.study.pmp.examDate = "2026-11-14";  // real Pearson VUE appt: Sat Nov 14, 8:00 AM
@@ -610,6 +624,18 @@ const { useState, useEffect, useRef } = React;
         const pmpId = (merged.study.subjects.find((su) => /pmp/i.test(su.name)) || {}).id;
         if (pmpId) { const t = { ...(merged.study.planTemplate || {}) }; ["Mon", "Tue", "Wed", "Thu", "Fri"].forEach((d) => { t[d] = { ...(t[d] || {}), [pmpId]: 120 }; }); ["Sat", "Sun"].forEach((d) => { t[d] = { ...(t[d] || {}), [pmpId]: 210 }; }); merged.study.planTemplate = t; }
       }
+      if (!merged.study.pmpExamV3) {   // v7.81 one-time (Oct 31 2026): exam moved Nov 14 → Fri Dec 11 8:00 AM; contact hours moved from PMTI videos to the LinkedIn Learning path
+        const P3 = merged.study.pmp;
+        if (P3.examDate === "2026-11-14") P3.examDate = "2026-12-11";
+        if (!P3.appt || typeof P3.appt !== "object") P3.appt = { ...PMP_EXAM_APPT };
+        const ck3 = (merged.study.pmpChecklist || []).slice();
+        PMP_EXAM_V3.forEach((u) => { const i = ck3.findIndex((it) => u.re.test(it.label || "")); if (i >= 0) ck3[i] = { ...ck3[i], label: u.label, note: u.note, status: u.status }; });
+        if (!ck3.some((it) => it.id === "ck_go_dec5")) ck3.push({ id: "ck_go_dec5", label: "★ Dec 5 full-length — GO/NO-GO for Dec 11", note: "Aim ≥75%. 65–74%: sit only if the error log is clean on People + Process. <65%: move the exam. Last day to change: Tue Dec 8 (nothing allowed within 48 hrs of the appointment); a $70 fee applies inside 30 days.", status: "todo" });
+        if (!ck3.some((it) => it.id === "ck_pto_dec11")) ck3.push({ id: "ck_pto_dec11", label: "Book PTO — Fri Dec 11 (and the afternoon of Thu Dec 10)", note: "", status: "todo" });
+        merged.study.pmpChecklist = ck3;
+        merged.study.subjects = merged.study.subjects.map((su) => (/pmp/i.test(su.name) && su.dueDate === "2026-11-13") ? { ...su, dueDate: "2026-12-10" } : su);
+        merged.study.pmpExamV3 = true;
+      }
       // v7.52 — Excel Functions Challenge: seed the subject and the level map into state that already exists
       if (Array.isArray(merged.study.subjects) && !merged.study.subjects.some((su) => su.id === "su7"))
         merged.study.subjects = [...merged.study.subjects, { id: "su7", name: "Excel Functions", emoji: "📐", goalHrs: 12, weeklyTarget: 1, cumGoal: 12, dueDate: "2026-12-13", weekdayTarget: 0.25, weekendTarget: 0.5 }];
@@ -667,7 +693,7 @@ const { useState, useEffect, useRef } = React;
       if (!merged.study.subjects.some((s) => /\bamp\b/i.test(s.name))) merged.study.subjects.push({ id: "su5", name: "AMP", emoji: "⚡", goalHrs: 59, weeklyTarget: 6, cumGoal: 59, dueDate: "2026-11-22", weekdayTarget: 1, weekendTarget: 1.5 });
       /* v6.60: PMP subject was still carrying contact-hours targets (35h, due Aug 13) — retarget to the exam */
       merged.study.subjects = merged.study.subjects.map((s) => (/pmp/i.test(s.name) && s.dueDate === "2026-08-13")
-        ? { ...s, goalHrs: 80, weeklyTarget: 8, cumGoal: 80, dueDate: "2026-11-13", weekdayTarget: 1, weekendTarget: 2 } : s);
+        ? { ...s, goalHrs: 80, weeklyTarget: 8, cumGoal: 80, dueDate: "2026-12-10", weekdayTarget: 1, weekendTarget: 2 } : s);
       merged.study.subjects = merged.study.subjects.map((s) => /\bamp\b/i.test(s.name) ? { ...s, weekdayTarget: typeof s.weekdayTarget === "number" ? s.weekdayTarget : 1, weekendTarget: typeof s.weekendTarget === "number" ? s.weekendTarget : 1.5 } : s);
       if (!merged.study.glossaryMastered || typeof merged.study.glossaryMastered !== "object") merged.study.glossaryMastered = {};
       if (!merged.study.flashcardDecks || typeof merged.study.flashcardDecks !== "object") merged.study.flashcardDecks = {};
@@ -3056,7 +3082,7 @@ const { useState, useEffect, useRef } = React;
                     { key: "fn", icon: "📐", name: "Functions", plan: FSM_WEEKS, wk: cur(FSM_WEEKS), sub: findSub(/function/i), go: "fnplan" },
                   ];
                   const todayPlan = (state.study.scheduleNotes || {})[T0] || "";
-                  const daysToExam = Math.round((new Date(((state.study.pmp || {}).examDate || "2026-11-14") + "T12:00:00") - new Date(T0 + "T12:00:00")) / 86400000);
+                  const daysToExam = Math.round((new Date(((state.study.pmp || {}).examDate || "2026-12-11") + "T12:00:00") - new Date(T0 + "T12:00:00")) / 86400000);
                   return (<div style={{ ...card, marginBottom: 12, border: `1.5px solid ${C.ember}` }}>
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 8 }}>
                       <p style={{ ...miniLabel, margin: 0, color: C.ember }}>TODAY · {dowName} {prettyDate(T0)}</p>
@@ -3776,13 +3802,14 @@ const { useState, useEffect, useRef } = React;
                   </>);
                 })()}
 
-                {/* ===== PMP HQ (Phase A) — exam 2026-11-14 · external tool logs · readiness tracking ===== */}
+                {/* ===== PMP HQ (Phase A) — exam 2026-12-11 · external tool logs · readiness tracking ===== */}
                 {studySub === "pmp" && pmpTab === "hq" && (() => {
-                  const P = (state.study && state.study.pmp) || { examDate: "2026-11-14", qlog: [], mocks: [], errors: [] };
+                  const P = (state.study && state.study.pmp) || { examDate: "2026-12-11", appt: { ...PMP_EXAM_APPT }, qlog: [], mocks: [], errors: [] };
                   const upPmp = (patch) => setState((s) => ({ ...s, study: { ...s.study, pmp: { ...(s.study.pmp || {}), ...patch } } }));
                   const nid = () => "p" + Date.now().toString(36) + Math.random().toString(36).slice(2, 4);
                   const T = todayStr();
                   const daysLeft = Math.max(0, Math.round((new Date(P.examDate + "T12:00:00") - new Date(T + "T12:00:00")) / 86400000));
+                  const chgDays = P.appt && P.appt.lastChange ? Math.round((new Date(P.appt.lastChange + "T12:00:00") - new Date(T + "T12:00:00")) / 86400000) : null;
                   const contactH = subjectSecs("su4", Date.now()) / 3600;
                   const qTotal = P.qlog.reduce((a, q) => a + (Number(q.total) || 0), 0);
                   const qCorrect = P.qlog.reduce((a, q) => a + (Number(q.correct) || 0), 0);
@@ -3894,6 +3921,13 @@ const { useState, useEffect, useRef } = React;
                             <p style={{ ...miniLabel, margin: "0 0 4px" }}>PMP EXAM · {P.examDate}</p>
                             <div style={{ fontFamily: "'Fraunces', serif", fontSize: 40, fontWeight: 700, color: C.ink, lineHeight: 1 }}>{daysLeft}</div>
                             <p style={{ fontFamily: "'DM Mono', monospace", fontSize: 10.5, color: C.soft, margin: "2px 0 0" }}>days · today's focus: <b style={{ color: C.navy }}>{cadence}</b></p>
+                            {P.appt && (
+                              <div style={{ borderTop: `1px solid ${C.line}`, marginTop: 10, paddingTop: 8, textAlign: "left" }}>
+                                <p style={{ fontFamily: "'DM Mono', monospace", fontSize: 10.5, color: C.soft, margin: "0 0 3px" }}>🕗 {P.appt.time} · {P.appt.lengthMin} min appointment</p>
+                                <p style={{ fontFamily: "'DM Mono', monospace", fontSize: 10.5, color: C.soft, margin: "0 0 3px" }}>📍 {P.appt.location}</p>
+                                <p style={{ fontFamily: "'DM Mono', monospace", fontSize: 10.5, color: chgDays != null && chgDays <= 7 ? C.ember : C.soft, margin: 0 }}>Last day to change: {P.appt.lastChange}{chgDays != null ? " · " + Math.max(0, chgDays) + " day" + (chgDays === 1 ? "" : "s") + " left" : ""}</p>
+                              </div>
+                            )}
                           </div>
                           <div style={{ ...card, marginBottom: 12, border: `1px solid ${verdict === "Ready" ? C.sage : verdict === "On Track" ? C.line : C.ember}` }}>
                             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
@@ -12044,7 +12078,7 @@ const ConsistencyApp = (function () {
     { id: "whole", name: "Whole foods",   desc: "Whole-food day, 5 of the last 7",   dot: "#7A8B5E" },
     { id: "water", name: "Water",         desc: "7-day avg: 80 oz or more",          dot: "#3F7C8C" },
   ];
-  // 100-day run: Sept 7 2026 → Dec 15 2026 (exam Nov 14 sits at day 69)
+  // 100-day run: Sept 7 2026 → Dec 15 2026 (exam Dec 11 sits at day 96)
   const RUN_START = "2026-09-07";
   const RUN_DAYS = 100;
 
@@ -12769,7 +12803,7 @@ const ConsistencyApp = (function () {
               <div style={{ height: "100%", width: pct + "%", background: "linear-gradient(90deg,#FFD700,#FF7A00)", borderRadius: 4 }} />
             </div>
             <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 9.5, color: "rgba(255,255,255,.72)", marginTop: 6 }}>
-              {addDays(RUN_START, 0)} → {runEnd} · exam Nov 14 lands on day {Math.floor((parse("2026-11-14") - parse(RUN_START)) / 86400000) + 1}
+              {addDays(RUN_START, 0)} → {runEnd} · exam Dec 11 lands on day {Math.floor((parse("2026-12-11") - parse(RUN_START)) / 86400000) + 1}
             </div>
           </div>);
         })()}
