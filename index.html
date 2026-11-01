@@ -109,7 +109,7 @@ const { useState, useEffect, useRef } = React;
     const SUPABASE_ANON  = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNsd2xuYnp4cmFpYXZwY2pidml5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQyMzg5NjksImV4cCI6MjA4OTgxNDk2OX0.-r80YRrZG2us0kQwFpo0IKbmYX45VsF8TFFnYPT3qsM";
     const TABLE         = "quick_log";
     const USER_KEY      = "linda";
-    const APP_VERSION   = "v7.81 · 2026-10-31";
+    const APP_VERSION   = "v7.82 · 2026-10-31";
     const TIME_ANALYZE_URL = "https://le-cadence-analyze.lesteps24.workers.dev/";
     const IDLE_GOAL_HRS = 1;   // target: no more than 1 hour of idle / TV per day
     const SESSION_TYPES = ["Study", "Class", "Quiz/Test", "Project", "Other"];
@@ -242,6 +242,50 @@ const { useState, useEffect, useRef } = React;
       ["T", "Rushed / ran out of time."],
     ];
 
+    // v7.82: LinkedIn Learning — Jabil PMP Preparation Path (32 h) + 3 h supplement. Contact hours now come from here.
+    // Mirrors the "LinkedIn Path" tab of PMP_Study_Plan.xlsx row for row: [#, course, section, length in seconds].
+    // Credit = full listed course length when a course is marked done (same rule as the workbook), regardless of playback speed.
+    const LI_TARGET = "2026-11-07";   // finish all 35 course hrs by Sat Nov 7 (Course Plan tab)
+    const LINKEDIN_PATH = [
+      [1, "Agile Foundations", "Approaches (Waterfall/Agile/Hybrid)", 7225],
+      [2, "Comparing Agile versus Waterfall Project Management", "Approaches (Waterfall/Agile/Hybrid)", 6934],
+      [3, "Blending Project Management Methods", "Approaches (Waterfall/Agile/Hybrid)", 3638],
+      [4, "Hybrid Project Management: Do What Works", "Approaches (Waterfall/Agile/Hybrid)", 4316],
+      [5, "Managing Change on an Agile Project", "Approaches (Waterfall/Agile/Hybrid)", 2243],
+      [6, "Mistakes to Avoid When Obtaining Your PMP Certification", "Approaches (Waterfall/Agile/Hybrid)", 2161],
+      [7, "Managing Team Conflict", "Domain I: People", 3475],
+      [8, "Leading Diverse Teams to Success", "Domain I: People", 2751],
+      [9, "How Managers Drive Extraordinary Team Performance", "Domain I: People", 2715],
+      [10, "Managing Project Stakeholders", "Domain I: People", 1383],
+      [11, "Leading Together: Coleading a Project, Team, or Organization", "Domain I: People", 2963],
+      [12, "Becoming an Agile Leader", "Domain I: People", 2505],
+      [13, "Build Your Team's Agility and Resilience", "Domain I: People", 2251],
+      [14, "Project Management Power Moves: Leading with Influence", "Domain I: People", 1686],
+      [15, "Business Development Foundations: Alliances & Partnerships", "Domain I: People", 2091],
+      [16, "Leading Remote Projects and Virtual Teams", "Domain I: People", 1767],
+      [17, "Roadmap to a Successful High-Performance Team", "Domain I: People", 2488],
+      [18, "Team Coaching Strategies for Project Managers", "Domain I: People", 3317],
+      [19, "Inspiring Today's Workforce to Go Above and Beyond", "Domain I: People", 2578],
+      [20, "Delivering Results with a Business-focused PMO", "Domain II: Process", 3442],
+      [21, "Project Management Foundations: Communication", "Domain II: Process", 3655],
+      [22, "Overcoming Project Risks: Real Strategies for Real Results", "Domain II: Process", 3646],
+      [23, "Project Management Foundations: Budgets", "Domain II: Process", 3453],
+      [24, "Project Management Foundations: Schedules", "Domain II: Process", 7660],
+      [25, "Project Management Foundations: Quality", "Domain II: Process", 2668],
+      [26, "Project Management: Preventing Scope Creep", "Domain II: Process", 2025],
+      [27, "Project Management Foundations: Integration", "Domain II: Process", 2665],
+      [28, "Adapt and Thrive: Change Management Skills Every PM Needs", "Domain II: Process", 2703],
+      [29, "Project Management Foundations: Requirements", "Domain II: Process", 1758],
+      [30, "Project Management Foundations", "Domain II: Process", 14501],
+      [31, "Project Management Foundations: Teams", "Domain II: Process", 1709],
+      [32, "Managing Project Benefits", "Domain III: Business Env", 4560],
+      [33, "Leading Change: Essential Skills for Program and Project Sponsors", "Domain III: Business Env", 3058],
+      [34, "Supplement (3 h) - choose course(s)", "Supplement", 10800]
+    ];
+    const LI_SECTIONS = ["Approaches (Waterfall/Agile/Hybrid)", "Domain I: People", "Domain II: Process", "Domain III: Business Env", "Supplement"];
+    const liDoneHrsOf = (doneMap) => LINKEDIN_PATH.reduce((a, r) => a + ((doneMap || {})[r[0]] ? r[3] / 3600 : 0), 0);
+
+    // RETIRED v7.82 (PMTI videos dropped Oct 31) — kept only so old saved state still reads.
     // PMTI 2026 video course — 44h total (35 needed for contact hours).
     // Per-video hours are estimates where PMTI only gives a section total.
     const PMTI_COURSE = [
@@ -345,8 +389,8 @@ const { useState, useEffect, useRef } = React;
       { w: "Wk2", s: "2026-10-05", e: "2026-10-11", m: "Treadmill: PMTI 6 h · Desk: Process (41%) sets + error log review · target 150–200 questions cumulative", t: 14, mode: "surge" },
       { w: "Wk3", s: "2026-10-12", e: "2026-10-18", m: "Treadmill: PMTI 6 h · ★ Oct 12 re-mock = reschedule gate (≥65 keep · 55–64 keep + 4 h weekends · <55 reschedule by Oct 15) · Desk: People (33%)", t: 14, mode: "surge" },
       { w: "Wk4", s: "2026-10-19", e: "2026-10-25", m: "Treadmill: PMTI 6 h · Desk: Business Environment (26%) + weakest domain from the error log", t: 14, mode: "protected" },
-      { w: "Wk5", s: "2026-10-26", e: "2026-11-01", m: "LinkedIn path: 23.5 course hrs Oct 31–Nov 1 at 2× (Approaches, People, start of Process) · Nov 1 AM = 60-question Study Hall baseline", t: 22, mode: "surge" },
-      { w: "Wk6", s: "2026-11-02", e: "2026-11-08", m: "LinkedIn path: finish all 35 hrs by Sat Nov 7 (evenings Mon/Tue/Thu + Sat AM) · ★ Nov 7 full-length mock 10:30–2:30 · Nov 8 review every miss by domain", t: 14, mode: "surge" },
+      { w: "Wk5", s: "2026-10-26", e: "2026-11-01", m: "LinkedIn path: 23.5 course hrs Oct 31–Nov 1 at 2× (Approaches, People, start of Process) · Nov 1 AM = 60-question Study Hall baseline", t: 13.3, mode: "surge" },
+      { w: "Wk6", s: "2026-11-02", e: "2026-11-08", m: "LinkedIn path: finish all 35 hrs by Sat Nov 7 (evenings Mon/Tue/Thu + Sat AM) · ★ Nov 7 full-length mock 10:30–2:30 · Nov 8 review every miss by domain", t: 12, mode: "surge" },
       { w: "Wk7", s: "2026-11-09", e: "2026-11-12", m: "PMTI Boot Camp — 4 days, 8:00–5:30. Clear the calendar.", t: 38, mode: "surge" },
       { w: "Wk8", s: "2026-11-13", e: "2026-11-15", m: "Post-bootcamp: daily timed Study Hall sets on the weakest domain · review every miss the same day", t: 7, mode: "protected" },
       { w: "Wk9", s: "2026-11-16", e: "2026-11-22", m: "Study Hall daily sets · ★ Sat Nov 21 full-length #2 (8:00–12:00)", t: 12, mode: "surge" },
@@ -378,7 +422,7 @@ const { useState, useEffect, useRef } = React;
       { w: "Wk2",   s: "2026-10-05", e: "2026-10-11", m: "XLOOKUP levels 5–8", t: 1, mode: "light" },
       { w: "Wk3",   s: "2026-10-12", e: "2026-10-18", m: "XMATCH — all eight levels", t: 1, mode: "light" },
       { w: "Wk4",   s: "2026-10-19", e: "2026-10-25", m: "SORT & SORTBY — all eight levels", t: 1, mode: "light" },
-      { w: "PAUSE", s: "2026-10-26", e: "2026-11-15", m: "PAUSED — PMP final push, bootcamp Nov 9–12, exam Nov 14. Levels still tick if you do them; no hours are expected.", t: 0, mode: "break" },
+      { w: "PAUSE", s: "2026-10-26", e: "2026-11-15", m: "PAUSED — PMP final push, bootcamp Nov 9–12 (exam now Dec 11). Levels still tick if you do them; no hours are expected.", t: 0, mode: "break" },
       { w: "Wk5",   s: "2026-11-16", e: "2026-11-22", m: "FILTER — all eight levels", t: 2, mode: "moderate" },
       { w: "Wk6",   s: "2026-11-23", e: "2026-11-29", m: "UNIQUE — all eight levels", t: 2, mode: "moderate" },
       { w: "Wk7",   s: "2026-11-30", e: "2026-12-06", m: "INDEX — all eight levels", t: 2, mode: "moderate" },
@@ -636,12 +680,23 @@ const { useState, useEffect, useRef } = React;
         merged.study.subjects = merged.study.subjects.map((su) => (/pmp/i.test(su.name) && su.dueDate === "2026-11-13") ? { ...su, dueDate: "2026-12-10" } : su);
         merged.study.pmpExamV3 = true;
       }
+      if (!merged.study.pmpLiV1) {   // v7.82 one-time: PMTI videos retired; LinkedIn path is the contact-hours source
+        let ck4 = (merged.study.pmpChecklist || []).filter((it) => it.id !== "ck_pmti_nov1" && !/PMTI 35 hrs on the treadmill/i.test(it.label || ""));
+        ck4 = ck4.map((it) => /PMTI completion certificate/i.test(it.label || "")
+          ? { ...it, label: "★ Save each LinkedIn course completion certificate", note: "The PMI application cites LinkedIn Learning for the 35 hrs, so these are your audit evidence. Download each certificate when you finish a course and file it with PMP_Application_Evidence.", status: "todo" } : it);
+        if (!ck4.some((it) => it.id === "ck_li_supp")) ck4.push({ id: "ck_li_supp", label: "Choose the 3 h supplement course(s)", note: "The Jabil path is 32.2 h and PMI needs 35. Pick course(s) of about 3 h, then mark row 34 done on the LinkedIn path card and the workbook.", status: "todo" });
+        if (!ck4.some((it) => it.id === "ck_pmti_cert")) ck4.push({ id: "ck_pmti_cert", label: "Ask PMTI: does the Nov 9–12 boot camp issue a 35-hour certificate?", note: "Backup evidence only. The plan no longer depends on the answer.", status: "todo" });
+        merged.study.pmpChecklist = ck4;
+        if (merged.study.links && typeof merged.study.links.pmp === "string" && !/linkedin/i.test(merged.study.links.pmp))
+          merged.study.links.pmp = "LinkedIn Learning — Jabil PMP path | paste-your-link-here\n" + merged.study.links.pmp;
+        merged.study.pmpLiV1 = true;
+      }
       // v7.52 — Excel Functions Challenge: seed the subject and the level map into state that already exists
       if (Array.isArray(merged.study.subjects) && !merged.study.subjects.some((su) => su.id === "su7"))
         merged.study.subjects = [...merged.study.subjects, { id: "su7", name: "Excel Functions", emoji: "📐", goalHrs: 12, weeklyTarget: 1, cumGoal: 12, dueDate: "2026-12-13", weekdayTarget: 0.25, weekendTarget: 0.5 }];
       if (!merged.study.fsmDone || typeof merged.study.fsmDone !== "object") merged.study.fsmDone = {};
       if (!merged.study.links) merged.study.links = {
-        pmp: "PMI Study Hall Plus | https://www.pmi.org/shop/us/p-/digital-product/project-management-professional-pmi-study-hall-plus/dp069\nPMTI Student Portal | https://www.onlinepmti.com\nPMTI | https://www.4pmti.com\nMyPMI — reschedule exam here | https://www.pmi.org\nPMP certification page | https://www.pmi.org/certifications/project-management-pmp\n2026 ECO (PMI, free PDF) | https://www.pmi.org/-/media/pmi/documents/public/pdf/certifications/new-pmp-examination-content-outline-2026.pdf\nPearson VUE — test center info only | https://www.pearsonvue.com\nPM Podcast (Fichtner) | https://www.pm-podcast.com\n5 Minutes (Vargas) | https://ricardo-vargas.com/podcasts/\nPMI Projectified | https://www.pmi.org/podcast\nDavid McLachlan (YouTube) | https://www.youtube.com/@davidmclachlanproject\n↳ PMP practice questions | https://www.youtube.com/playlist?list=PLEWFSKHjyrwywWx6mri0ooX5YVjDPrgX1",
+        pmp: "LinkedIn Learning — Jabil PMP path | paste-your-link-here\nPMI Study Hall Plus | https://www.pmi.org/shop/us/p-/digital-product/project-management-professional-pmi-study-hall-plus/dp069\nPMTI Student Portal | https://www.onlinepmti.com\nPMTI | https://www.4pmti.com\nMyPMI — reschedule exam here | https://www.pmi.org\nPMP certification page | https://www.pmi.org/certifications/project-management-pmp\n2026 ECO (PMI, free PDF) | https://www.pmi.org/-/media/pmi/documents/public/pdf/certifications/new-pmp-examination-content-outline-2026.pdf\nPearson VUE — test center info only | https://www.pearsonvue.com\nPM Podcast (Fichtner) | https://www.pm-podcast.com\n5 Minutes (Vargas) | https://ricardo-vargas.com/podcasts/\nPMI Projectified | https://www.pmi.org/podcast\nDavid McLachlan (YouTube) | https://www.youtube.com/@davidmclachlanproject\n↳ PMP practice questions | https://www.youtube.com/playlist?list=PLEWFSKHjyrwywWx6mri0ooX5YVjDPrgX1",
         ampplan: "AMP portal | paste-your-link-here",
         scplan: "MasterClass — log in as lndae24 | https://www.masterclass.com/certificates/strategic-communication-build-trust-drive-decisions-lead-with-influence\nPractice Studio | #practice",
         fnplan: "Functions Challenge Series | https://app.fullstackmodeller.com/spaces/23313217/page\nAll three challenge series | https://challenges.fullstackmodeller.com/",
@@ -1083,7 +1138,8 @@ const { useState, useEffect, useRef } = React;
       const [ampSecOpen, setAmpSecOpen] = useState({});
       const setPmtiPos = (id, v) => setState((st) => ({ ...st, study: { ...st.study, pmtiPos: { ...(st.study.pmtiPos || {}), [id]: v } } }));
       const [pmtiOpen, setPmtiOpen] = useState({});
-      const [pmtiSpeed, setPmtiSpeed] = useState(1.5);
+      const [pmtiSpeed, setPmtiSpeed] = useState(2);   // v7.82: playback speed for the LinkedIn path (workbook assumption = 2×)
+      const toggleLi = (n) => setState((st) => { const d = { ...(st.study.liDone || {}) }; if (d[n]) delete d[n]; else d[n] = true; return { ...st, study: { ...st.study, liDone: d } }; });
       const setEx = (id, field, val) => setState((st) => ({ ...st, study: { ...st.study, ampExercises: (st.study.ampExercises || []).map((x) => x.id === id ? { ...x, [field]: val } : x) } }));
       const cycleEx = (id) => setState((st) => ({ ...st, study: { ...st.study, ampExercises: (st.study.ampExercises || []).map((x) => x.id === id ? { ...x, status: CHK_CYCLE[x.status] || "todo" } : x) } }));
       const addEx = () => setState((st) => ({ ...st, study: { ...st.study, ampExercises: [...(st.study.ampExercises || []), { id: "ax" + Date.now().toString(36), num: "", letter: "Q", letterName: "Questioning", title: "New exercise", prompt: "", notes: "", status: "todo" }] } }));
@@ -1550,7 +1606,7 @@ const { useState, useEffect, useRef } = React;
           const P = (state.study && state.study.pmp) || null;
           if (P && P.examDate) {
             const dl = Math.max(0, Math.round((new Date(P.examDate + "T12:00:00") - new Date(ctx.today + "T12:00:00")) / 86400000));
-            const ch = subjectSecs("su4", Date.now()) / 3600;
+            const ch = liDoneHrsOf(state.study.liDone);
             const qt = (P.qlog || []).reduce((a2, q2) => a2 + (Number(q2.total) || 0), 0);
             const mn = (P.mocks || []).length;
             const ma = mn ? Math.round((P.mocks || []).reduce((a2, m2) => a2 + (Number(m2.score) || 0), 0) / mn) : null;
@@ -3810,7 +3866,7 @@ const { useState, useEffect, useRef } = React;
                   const T = todayStr();
                   const daysLeft = Math.max(0, Math.round((new Date(P.examDate + "T12:00:00") - new Date(T + "T12:00:00")) / 86400000));
                   const chgDays = P.appt && P.appt.lastChange ? Math.round((new Date(P.appt.lastChange + "T12:00:00") - new Date(T + "T12:00:00")) / 86400000) : null;
-                  const contactH = subjectSecs("su4", Date.now()) / 3600;
+                  const contactH = liDoneHrsOf(state.study.liDone);   // v7.82: course credit from the LinkedIn path, not logged clock time
                   const qTotal = P.qlog.reduce((a, q) => a + (Number(q.total) || 0), 0);
                   const qCorrect = P.qlog.reduce((a, q) => a + (Number(q.correct) || 0), 0);
                   const qPct = qTotal ? Math.round((qCorrect / qTotal) * 100) : null;
@@ -3826,7 +3882,7 @@ const { useState, useEffect, useRef } = React;
                   /* transparent readiness */
                   const flags = [];
                   const contactPct = Math.min(100, Math.round((contactH / 35) * 100));
-                  if (contactH < 35) flags.push("contact hours " + contactH.toFixed(1) + "/35 — Phase 1 gate (due Aug 13)");
+                  if (contactH < 35) flags.push("contact hours " + contactH.toFixed(1) + "/35 — LinkedIn path, target Sat Nov 7");
                   if (qTotal < 2000) flags.push(qTotal + "/2000 practice questions");
                   if (mockN < 6) flags.push(mockN + "/6 mock exams");
                   if (mockAvg != null && mockAvg < 75) flags.push("mock average " + mockAvg + "% — target 75–80%");
@@ -3838,12 +3894,12 @@ const { useState, useEffect, useRef } = React;
                   const dshift = (ds, n) => { const d2 = new Date(ds + "T12:00:00"); d2.setDate(d2.getDate() + n); return d2.toISOString().slice(0, 10); };
                   const mondayOf = (ds) => { const d2 = new Date(ds + "T12:00:00"); const dow = (d2.getDay() + 6) % 7; return dshift(ds, -dow); };
                   const pmpSubj = (state.study.subjects || []).find((su) => su.id === "su4") || {};
-                  const p1End = pmpSubj.dueDate || dshift(P.examDate, -70);            // Phase 1: contact hours + application gate
+                  const p1End = LI_TARGET;                                             // Phase 1: contact hours (LinkedIn path) — v7.82
                   const p4Start = dshift(P.examDate, -7);                              // Phase 4: final week
                   const p2End = dshift(p1End, 21);                                     // Phase 2: 3 weeks of knowledge building
                   const phaseOf = (ws) => { const we = dshift(ws, 6); if (we >= p4Start) return 4; if (we > p2End) return 3; if (we > p1End) return 2; return 1; };
                   const PHASE_META = {
-                    1: ["Finish contact hours", "PMTI recorded course · amend PMI education record · Study Hall diagnostic by Oct 1", (pmpSubj.weeklyTarget || 6.75) + "h study"],
+                    1: ["Finish contact hours", "LinkedIn Learning path · save each course certificate · Nov 7 full mock", (pmpSubj.weeklyTarget || 6.75) + "h study"],
                     2: ["Build knowledge", "one topic daily · 20–30 questions/day · build the error log", "~150 Qs"],
                     3: ["Build endurance", "40–60 questions on weekdays · one full mock every weekend", "~250 Qs · 1 mock"],
                     4: ["Final review", "weak areas · agile refresh · formulas · final mock · taper", "light + 1 mock"],
@@ -4160,64 +4216,68 @@ const { useState, useEffect, useRef } = React;
                   );
                 })()}
                 {studySub === "pmp" && pmpTab === "plan" && (() => {
-                  const done = state.study.pmtiDone || {};
-                  const allItems = PMTI_COURSE.flatMap((sec) => sec.items.map(([id, nm, h]) => ({ id, h, mand: sec.tag === "MANDATORY" })));
-                  const totalH = allItems.reduce((a, x) => a + x.h, 0);
-                  const doneH = allItems.filter((x) => done[x.id]).reduce((a, x) => a + x.h, 0);
-                  const leftH = totalH - doneH;
-                  const pctH = totalH > 0 ? doneH / totalH * 100 : 0;
+                  /* v7.82: LinkedIn Learning path replaces the PMTI video tracker. Same rows and credit rule as the workbook's LinkedIn Path tab. */
+                  const done = state.study.liDone || {};
+                  const totalH = LINKEDIN_PATH.reduce((a, r) => a + r[3] / 3600, 0);
+                  const doneH = liDoneHrsOf(done);
+                  const needH = Math.max(0, 35 - doneH);
                   const contactPct = Math.min(100, doneH / 35 * 100);
                   const atSpeed = (h) => h / pmtiSpeed;
-                  const target = "2026-11-01";   // v7.57: PMTI moved to the treadmill track — 6 h/wk finishes ~Nov 1
-                  const daysLeft = Math.max(0, Math.round((parse(target) - parse(todayStr())) / 86400000));
-                  const perDay = daysLeft > 0 ? atSpeed(Math.max(0, 35 - doneH)) / daysLeft : 0;
+                  const daysLeft = Math.max(0, Math.round((parse(LI_TARGET) - parse(todayStr())) / 86400000) + 1);   // includes today and Nov 7
+                  const perDay = daysLeft > 0 ? atSpeed(needH) / daysLeft : 0;
+                  const linkLine = String((state.study.links || {}).pmp || "").split("\n").find((l) => /linkedin/i.test(l) && /https?:\/\//.test(l));
+                  const liUrl = linkLine ? linkLine.slice(linkLine.indexOf("http")).trim() : null;
+                  const fmtH = (sec) => { const m = Math.round(sec / 60); return Math.floor(m / 60) + "h " + String(m % 60).padStart(2, "0") + "m"; };
                   return (<>
                     <div style={{ ...card, marginBottom: 10, border: `1.5px solid ${C.navy}` }}>
-                      <p style={{ ...miniLabel, marginTop: 0, marginBottom: 6 }}>PMTI VIDEO COURSE — {doneH.toFixed(1)} / {totalH.toFixed(1)}h</p>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+                        <p style={{ ...miniLabel, margin: 0 }}>LINKEDIN LEARNING PATH — {doneH.toFixed(1)} / 35 CONTACT HRS</p>
+                        {liUrl
+                          ? <a href={liUrl} target="_blank" rel="noopener noreferrer" style={{ textDecoration: "none", background: C.navy, color: "#fff", borderRadius: 6, padding: "3px 8px", fontFamily: "'DM Mono', monospace", fontSize: 9.5 }}>Open path ↗</a>
+                          : <span style={{ fontFamily: "'DM Mono', monospace", fontSize: 9, color: C.ember }}>add the path link under Links</span>}
+                      </div>
                       <div style={{ height: 7, background: C.bg, borderRadius: 4, overflow: "hidden" }}>
-                        <div style={{ height: "100%", width: pctH + "%", background: C.navy, borderRadius: 4 }} />
+                        <div style={{ height: "100%", width: contactPct + "%", background: doneH >= 35 ? C.sage : C.navy, borderRadius: 4 }} />
                       </div>
                       <div style={{ display: "flex", justifyContent: "space-between", fontFamily: "'DM Mono', monospace", fontSize: 9.5, color: C.soft, marginTop: 5 }}>
-                        <span>{leftH.toFixed(1)}h left · {atSpeed(leftH).toFixed(1)}h at {pmtiSpeed}×</span>
-                        <span style={{ color: doneH >= 35 ? C.sage : C.soft }}>{contactPct.toFixed(0)}% of the 35 needed</span>
+                        <span>{needH.toFixed(1)} course h to go · {atSpeed(needH).toFixed(1)} clock h at {pmtiSpeed}×</span>
+                        <span style={{ color: doneH >= 35 ? C.sage : C.soft }}>{contactPct.toFixed(0)}%</span>
                       </div>
                       <div style={{ display: "flex", gap: 6, marginTop: 9, alignItems: "center" }}>
                         <span style={{ fontFamily: "'DM Mono', monospace", fontSize: 9.5, color: C.faint }}>speed</span>
-                        {[1, 1.25, 1.5, 1.75, 2].map((v) => (
+                        {[1, 1.5, 2].map((v) => (
                           <button key={v} onClick={() => setPmtiSpeed(v)} style={{ border: `1px solid ${pmtiSpeed === v ? C.navy : C.line}`, background: pmtiSpeed === v ? C.navy : "transparent", color: pmtiSpeed === v ? "#fff" : C.soft, borderRadius: 99, padding: "3px 9px", fontFamily: "'DM Mono', monospace", fontSize: 10, cursor: "pointer" }}>{v}×</button>
                         ))}
                       </div>
-                      <p style={{ fontFamily: "'DM Mono', monospace", fontSize: 9, color: daysLeft > 0 && perDay > 2.5 ? C.ember : C.faint, margin: "8px 0 0", lineHeight: 1.5 }}>
-                        {doneH >= 35 ? "35 contact hours covered — save the completion certificate." : `${daysLeft}d to Nov 1 · ${perDay.toFixed(1)}h/day at ${pmtiSpeed}× to hit 35 (≈ ${(perDay * 7).toFixed(1)} h/wk on the treadmill)`}
+                      <p style={{ fontFamily: "'DM Mono', monospace", fontSize: 9, color: daysLeft > 0 && perDay > 4 ? C.ember : C.faint, margin: "8px 0 0", lineHeight: 1.5 }}>
+                        {doneH >= 35 ? "35 contact hours covered — download every course certificate." : (daysLeft > 0 ? `${daysLeft}d to Sat Nov 7 · ${perDay.toFixed(1)} clock h/day at ${pmtiSpeed}×` : "Past the Nov 7 target — hours still open. Check the workbook's Course Plan before adding blocks.")}
                       </p>
-                      <p style={{ fontFamily: "'DM Mono', monospace", fontSize: 9, color: C.faint, margin: "6px 0 0", lineHeight: 1.5 }}>Course is 44h; only 35 are required. 2× on the treadmill — it's terminology, not exam content. ⏱ field = where you stopped, so you can scrub straight back to it.</p>
+                      <p style={{ fontFamily: "'DM Mono', monospace", fontSize: 9, color: C.faint, margin: "6px 0 0", lineHeight: 1.5 }}>Path is {totalH.toFixed(1)} h including the 3 h supplement placeholder. A course counts its full listed length when marked done, same as the workbook. ASSUMPTION: the certificate shows course length, not watch time.</p>
                     </div>
 
-                    {PMTI_COURSE.map((sec) => {
-                      const open = !!pmtiOpen[sec.id];
-                      const sDone = sec.items.filter(([id]) => done[id]).length;
-                      const sDoneH = sec.items.filter(([id]) => done[id]).reduce((a, [, , h]) => a + h, 0);
-                      const allDone = sDone === sec.items.length;
-                      return (<div key={sec.id} style={{ ...card, marginBottom: 6, padding: "10px 12px", opacity: allDone ? 0.65 : 1, border: sec.tag === "MANDATORY" ? `1px solid ${C.navy}` : `1px solid ${C.line}` }}>
-                        <div onClick={() => setPmtiOpen((o) => ({ ...o, [sec.id]: !o[sec.id] }))} style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
+                    {LI_SECTIONS.map((secName) => {
+                      const rows = LINKEDIN_PATH.filter((r) => r[2] === secName);
+                      const key = "li_" + secName;
+                      const open = !!pmtiOpen[key];
+                      const secH = rows.reduce((a, r) => a + r[3] / 3600, 0);
+                      const sDone = rows.filter((r) => done[r[0]]);
+                      const sDoneH = sDone.reduce((a, r) => a + r[3] / 3600, 0);
+                      const allDone = sDone.length === rows.length;
+                      return (<div key={key} style={{ ...card, marginBottom: 6, padding: "10px 12px", opacity: allDone ? 0.65 : 1 }}>
+                        <div onClick={() => setPmtiOpen((o) => ({ ...o, [key]: !o[key] }))} style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
                           <span style={{ fontFamily: "'DM Mono', monospace", fontSize: 11, color: C.soft, width: 10 }}>{open ? "▾" : "▸"}</span>
                           <div style={{ flex: 1, minWidth: 0 }}>
-                            <div style={{ fontFamily: "'Hanken Grotesk', sans-serif", fontWeight: 700, fontSize: 13, color: allDone ? C.sage : C.ink }}>
-                              {sec.sec} {sec.tag ? <span style={{ fontFamily: "'DM Mono', monospace", fontSize: 8.5, color: C.navy, border: `1px solid ${C.navy}`, borderRadius: 4, padding: "1px 4px", marginLeft: 4 }}>{sec.tag}</span> : null}
-                            </div>
-                            <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 9.5, color: C.faint }}>{sDone}/{sec.items.length} · {sDoneH.toFixed(1)}/{sec.hrs}h · {atSpeed(sec.hrs).toFixed(1)}h at {pmtiSpeed}×</div>
+                            <div style={{ fontFamily: "'Hanken Grotesk', sans-serif", fontWeight: 700, fontSize: 13, color: allDone ? C.sage : C.ink }}>{secName}</div>
+                            <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 9.5, color: C.faint }}>{sDone.length}/{rows.length} · {sDoneH.toFixed(1)}/{secH.toFixed(1)}h · {atSpeed(secH).toFixed(1)}h at {pmtiSpeed}×</div>
                           </div>
                           {allDone ? <span style={{ color: C.sage, fontSize: 14 }}>✓</span> : null}
                         </div>
-                        {sec.note && open ? <p style={{ fontFamily: "'Hanken Grotesk', sans-serif", fontSize: 11.5, color: C.soft, margin: "8px 0 4px 18px", lineHeight: 1.45 }}>{sec.note}</p> : null}
-                        {open ? sec.items.map(([id, nm, h]) => {
-                          const d = !!done[id];
-                          const pos = (state.study.pmtiPos || {})[id] || "";
-                          return (<div key={id} style={{ display: "flex", alignItems: "center", gap: 9, padding: "5px 0 5px 18px", borderTop: `1px solid ${C.bg}` }}>
-                            <span onClick={() => togglePmti(id)} style={{ width: 17, height: 17, flexShrink: 0, borderRadius: 5, border: `1.5px solid ${d ? C.sage : C.faint}`, background: d ? C.sage : "transparent", color: "#fff", fontSize: 11, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}>{d ? "✓" : ""}</span>
-                            <span onClick={() => togglePmti(id)} style={{ flex: 1, fontFamily: "'Hanken Grotesk', sans-serif", fontSize: 12.5, color: d ? C.faint : C.ink, textDecoration: d ? "line-through" : "none", cursor: "pointer" }}>{nm}</span>
-                            {!d ? <input value={pos} onChange={(e) => setPmtiPos(id, e.target.value)} placeholder="⏱ h:mm" inputMode="numeric" style={{ width: 64, border: `1px solid ${pos ? C.navy : C.line}`, borderRadius: 6, padding: "3px 6px", fontFamily: "'DM Mono', monospace", fontSize: 10.5, color: pos ? C.navy : C.faint, background: "transparent", textAlign: "center" }} /> : null}
-                            <span style={{ fontFamily: "'DM Mono', monospace", fontSize: 9.5, color: C.faint, width: 30, textAlign: "right" }}>{h}h</span>
+                        {open ? rows.map(([n, nm, , sec]) => {
+                          const d = !!done[n];
+                          return (<div key={n} style={{ display: "flex", alignItems: "center", gap: 9, padding: "5px 0 5px 18px", borderTop: `1px solid ${C.bg}` }}>
+                            <span onClick={() => toggleLi(n)} style={{ width: 17, height: 17, flexShrink: 0, borderRadius: 5, border: `1.5px solid ${d ? C.sage : C.faint}`, background: d ? C.sage : "transparent", color: "#fff", fontSize: 11, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}>{d ? "✓" : ""}</span>
+                            <span onClick={() => toggleLi(n)} style={{ flex: 1, fontFamily: "'Hanken Grotesk', sans-serif", fontSize: 12.5, color: d ? C.faint : C.ink, textDecoration: d ? "line-through" : "none", cursor: "pointer" }}>{n}. {nm}</span>
+                            <span style={{ fontFamily: "'DM Mono', monospace", fontSize: 9.5, color: C.faint, whiteSpace: "nowrap" }}>{fmtH(sec)}</span>
                           </div>);
                         }) : null}
                       </div>);
@@ -4270,7 +4330,7 @@ const { useState, useEffect, useRef } = React;
                     </div>
                     <div style={{ ...card, marginBottom: 10 }}>
                       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-                        <p style={{ ...miniLabel, margin: 0 }}>PMP STUDY PLAN — EXAM NOV 14, 2026</p>
+                        <p style={{ ...miniLabel, margin: 0 }}>PMP STUDY PLAN — EXAM FRI DEC 11, 2026</p>
                         <div style={{ display: "flex", gap: 6 }}>
                           <a href={PMP_ONENOTE_URL} target="_blank" rel="noopener noreferrer" style={{ textDecoration: "none", border: `1px solid ${C.line}`, background: "transparent", color: C.navy, borderRadius: 6, padding: "3px 8px", fontFamily: "'DM Mono', monospace", fontSize: 9.5, cursor: "pointer", display: "inline-flex", alignItems: "center" }}>📓 Open in OneNote</a>
                           {pmpReflow ? <button onClick={resetPmpReflow} style={{ border: `1px solid ${C.line}`, background: "transparent", color: C.soft, borderRadius: 6, padding: "3px 8px", fontFamily: "'DM Mono', monospace", fontSize: 9.5, cursor: "pointer" }}>Reset</button> : null}
