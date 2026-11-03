@@ -4,6 +4,12 @@ Shell version is `APP_VERSION` near the top of `index.html` (inside QuickLogApp)
 `APP_VERSION`: Health, Muse, Streaks (ConsistencyApp), Practice. Bump the shell on every deploy; bump an app's
 version only when that app changed.
 
+## v7.83 — 2026-11-03 (PMP)
+- **Contact hours now come from the PMTI boot camp Nov 9–12.** PMTI confirmed by phone (Nov 2) it is exactly 35 hours with a certificate. The PMP HQ contact-hours count accrues by schedule (8.75 h per completed boot-camp day; full 35 once Nov 12 has passed) and takes whichever is higher — boot camp or the LinkedIn path. It assumes you attend every day.
+- **LinkedIn Learning path (v7.82) is now backup only.** Card retitled, no Nov 7 deadline or per-day pressure; Phase 1 of the roadmap ends Nov 12.
+- **PMP checklist (one-time update):** contact-hours item points at the boot camp; the certificate item says to get PMTI's confirmation in writing and reconcile it with what the PMI application lists; the 3 h supplement and "ask PMTI" items are removed.
+- **PMP Plan:** Wk6 = Study Hall practice sets (not videos); Wk7 notes the boot camp is the 35 hours.
+
 ## v7.81 — 2026-10-31 (PMP)
 - **PMP exam moved to Fri Dec 11, 2026, 8:00 AM ET** (Pearson VUE rescheduling confirmation). A one-time migration moves a saved Nov 14 exam date; a date you set yourself is left alone.
 - **PMP HQ → Overview** now shows the appointment under the countdown: time, 270-minute length, test center, and the last day to change (Tue Dec 8, red inside 7 days).

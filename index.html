@@ -109,7 +109,7 @@ const { useState, useEffect, useRef } = React;
     const SUPABASE_ANON  = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNsd2xuYnp4cmFpYXZwY2pidml5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQyMzg5NjksImV4cCI6MjA4OTgxNDk2OX0.-r80YRrZG2us0kQwFpo0IKbmYX45VsF8TFFnYPT3qsM";
     const TABLE         = "quick_log";
     const USER_KEY      = "linda";
-    const APP_VERSION   = "v7.82 · 2026-10-31";
+    const APP_VERSION   = "v7.83 · 2026-11-03";
     const TIME_ANALYZE_URL = "https://le-cadence-analyze.lesteps24.workers.dev/";
     const IDLE_GOAL_HRS = 1;   // target: no more than 1 hour of idle / TV per day
     const SESSION_TYPES = ["Study", "Class", "Quiz/Test", "Project", "Other"];
@@ -284,6 +284,16 @@ const { useState, useEffect, useRef } = React;
     ];
     const LI_SECTIONS = ["Approaches (Waterfall/Agile/Hybrid)", "Domain I: People", "Domain II: Process", "Domain III: Business Env", "Supplement"];
     const liDoneHrsOf = (doneMap) => LINKEDIN_PATH.reduce((a, r) => a + ((doneMap || {})[r[0]] ? r[3] / 3600 : 0), 0);
+    // v7.83: PMTI boot camp Nov 9–12 = the 35 contact hours (PMTI confirmed by phone Nov 2; certificate to follow). LinkedIn is now backstop only.
+    // Credit accrues by schedule (8.75 h per completed day, full 35 once the last day has passed) — it assumes you attend every day.
+    const BOOTCAMP = { start: "2026-11-09", end: "2026-11-12", hrs: 35 };
+    const bootcampHrsBy = (todayS) => {
+      if (todayS > BOOTCAMP.end) return BOOTCAMP.hrs;
+      if (todayS <= BOOTCAMP.start) return 0;
+      const days = Math.round((new Date(todayS + "T12:00:00") - new Date(BOOTCAMP.start + "T12:00:00")) / 86400000);
+      return Math.min(BOOTCAMP.hrs, days * (BOOTCAMP.hrs / 4));
+    };
+    const contactHrsOf = (doneMap, todayS) => Math.max(liDoneHrsOf(doneMap), bootcampHrsBy(todayS));
 
     // RETIRED v7.82 (PMTI videos dropped Oct 31) — kept only so old saved state still reads.
     // PMTI 2026 video course — 44h total (35 needed for contact hours).
@@ -390,8 +400,8 @@ const { useState, useEffect, useRef } = React;
       { w: "Wk3", s: "2026-10-12", e: "2026-10-18", m: "Treadmill: PMTI 6 h · ★ Oct 12 re-mock = reschedule gate (≥65 keep · 55–64 keep + 4 h weekends · <55 reschedule by Oct 15) · Desk: People (33%)", t: 14, mode: "surge" },
       { w: "Wk4", s: "2026-10-19", e: "2026-10-25", m: "Treadmill: PMTI 6 h · Desk: Business Environment (26%) + weakest domain from the error log", t: 14, mode: "protected" },
       { w: "Wk5", s: "2026-10-26", e: "2026-11-01", m: "LinkedIn path: 23.5 course hrs Oct 31–Nov 1 at 2× (Approaches, People, start of Process) · Nov 1 AM = 60-question Study Hall baseline", t: 13.3, mode: "surge" },
-      { w: "Wk6", s: "2026-11-02", e: "2026-11-08", m: "LinkedIn path: finish all 35 hrs by Sat Nov 7 (evenings Mon/Tue/Thu + Sat AM) · ★ Nov 7 full-length mock 10:30–2:30 · Nov 8 review every miss by domain", t: 12, mode: "surge" },
-      { w: "Wk7", s: "2026-11-09", e: "2026-11-12", m: "PMTI Boot Camp — 4 days, 8:00–5:30. Clear the calendar.", t: 38, mode: "surge" },
+      { w: "Wk6", s: "2026-11-02", e: "2026-11-08", m: "Study Hall practice, not videos (the 35 hrs now come from the boot camp): Mon People · Tue Business Env · Thu Process · Sat AM warm-up · ★ Nov 7 full-length mock 10:30–2:30 · Nov 8 review every miss by domain", t: 12, mode: "surge" },
+      { w: "Wk7", s: "2026-11-09", e: "2026-11-12", m: "PMTI Boot Camp — 4 days, 8:00–5:30 = the 35 contact hours (confirmed by PMTI Nov 2). Clear the calendar; do not miss a day. Collect the certificate.", t: 38, mode: "surge" },
       { w: "Wk8", s: "2026-11-13", e: "2026-11-15", m: "Post-bootcamp: daily timed Study Hall sets on the weakest domain · review every miss the same day", t: 7, mode: "protected" },
       { w: "Wk9", s: "2026-11-16", e: "2026-11-22", m: "Study Hall daily sets · ★ Sat Nov 21 full-length #2 (8:00–12:00)", t: 12, mode: "surge" },
       { w: "Wk10", s: "2026-11-23", e: "2026-11-29", m: "Thanksgiving week — light: ~30 min/day, error log only", t: 3.5, mode: "light" },
@@ -690,6 +700,18 @@ const { useState, useEffect, useRef } = React;
         if (merged.study.links && typeof merged.study.links.pmp === "string" && !/linkedin/i.test(merged.study.links.pmp))
           merged.study.links.pmp = "LinkedIn Learning — Jabil PMP path | paste-your-link-here\n" + merged.study.links.pmp;
         merged.study.pmpLiV1 = true;
+      }
+      if (!merged.study.pmpBootcampV1) {   // v7.83 one-time (Nov 3 2026): PMTI confirmed the Nov 9–12 boot camp is exactly 35 contact hours + certificate; LinkedIn demoted to backup
+        let ck5 = (merged.study.pmpChecklist || []).filter((it) => it.id !== "ck_li_supp" && it.id !== "ck_pmti_cert");
+        ck5 = ck5.map((it) => {
+          if (/Complete 35 contact hours/i.test(it.label || ""))
+            return { ...it, label: "Complete 35 contact hours — PMTI boot camp Nov 9–12", status: "progress", note: "Nov 2: Yad at PMTI confirmed by phone the boot camp is EXACTLY 35 contact hours and a certificate is provided. Hours complete Thu Nov 12 — attend all 4 days (a missed day = short of 35). The LinkedIn path is backup + gap-filler for People / Business Environment, not the gate." };
+          if (/Save each LinkedIn course completion certificate/i.test(it.label || ""))
+            return { ...it, label: "★ Get PMTI certificate (35 hrs) in writing + file it", status: "todo", note: "Email Yad: certificate shows 35 contact hours, PMI Authorized Training Partner, 2026 ECO content, issue date. Phone confirmation only so far (Nov 2). Then check what your PMI application lists under contact hours — it cites LinkedIn Learning; if audited, the evidence must match what you listed. File with PMP_Application_Evidence and keep the LinkedIn completion certificates too." };
+          return it;
+        });
+        merged.study.pmpChecklist = ck5;
+        merged.study.pmpBootcampV1 = true;
       }
       // v7.52 — Excel Functions Challenge: seed the subject and the level map into state that already exists
       if (Array.isArray(merged.study.subjects) && !merged.study.subjects.some((su) => su.id === "su7"))
@@ -1606,7 +1628,7 @@ const { useState, useEffect, useRef } = React;
           const P = (state.study && state.study.pmp) || null;
           if (P && P.examDate) {
             const dl = Math.max(0, Math.round((new Date(P.examDate + "T12:00:00") - new Date(ctx.today + "T12:00:00")) / 86400000));
-            const ch = liDoneHrsOf(state.study.liDone);
+            const ch = contactHrsOf(state.study.liDone, ctx.today);
             const qt = (P.qlog || []).reduce((a2, q2) => a2 + (Number(q2.total) || 0), 0);
             const mn = (P.mocks || []).length;
             const ma = mn ? Math.round((P.mocks || []).reduce((a2, m2) => a2 + (Number(m2.score) || 0), 0) / mn) : null;
@@ -3866,7 +3888,7 @@ const { useState, useEffect, useRef } = React;
                   const T = todayStr();
                   const daysLeft = Math.max(0, Math.round((new Date(P.examDate + "T12:00:00") - new Date(T + "T12:00:00")) / 86400000));
                   const chgDays = P.appt && P.appt.lastChange ? Math.round((new Date(P.appt.lastChange + "T12:00:00") - new Date(T + "T12:00:00")) / 86400000) : null;
-                  const contactH = liDoneHrsOf(state.study.liDone);   // v7.82: course credit from the LinkedIn path, not logged clock time
+                  const contactH = contactHrsOf(state.study.liDone, T);   // v7.83: boot camp (35 h, by schedule) or the LinkedIn path, whichever is higher
                   const qTotal = P.qlog.reduce((a, q) => a + (Number(q.total) || 0), 0);
                   const qCorrect = P.qlog.reduce((a, q) => a + (Number(q.correct) || 0), 0);
                   const qPct = qTotal ? Math.round((qCorrect / qTotal) * 100) : null;
@@ -3882,7 +3904,7 @@ const { useState, useEffect, useRef } = React;
                   /* transparent readiness */
                   const flags = [];
                   const contactPct = Math.min(100, Math.round((contactH / 35) * 100));
-                  if (contactH < 35) flags.push("contact hours " + contactH.toFixed(1) + "/35 — LinkedIn path, target Sat Nov 7");
+                  if (contactH < 35) flags.push("contact hours " + contactH.toFixed(1) + "/35 — PMTI boot camp Nov 9–12 supplies them; LinkedIn is backup");
                   if (qTotal < 2000) flags.push(qTotal + "/2000 practice questions");
                   if (mockN < 6) flags.push(mockN + "/6 mock exams");
                   if (mockAvg != null && mockAvg < 75) flags.push("mock average " + mockAvg + "% — target 75–80%");
@@ -3894,12 +3916,12 @@ const { useState, useEffect, useRef } = React;
                   const dshift = (ds, n) => { const d2 = new Date(ds + "T12:00:00"); d2.setDate(d2.getDate() + n); return d2.toISOString().slice(0, 10); };
                   const mondayOf = (ds) => { const d2 = new Date(ds + "T12:00:00"); const dow = (d2.getDay() + 6) % 7; return dshift(ds, -dow); };
                   const pmpSubj = (state.study.subjects || []).find((su) => su.id === "su4") || {};
-                  const p1End = LI_TARGET;                                             // Phase 1: contact hours (LinkedIn path) — v7.82
+                  const p1End = BOOTCAMP.end;                                          // Phase 1: contact hours (PMTI boot camp) — v7.83
                   const p4Start = dshift(P.examDate, -7);                              // Phase 4: final week
                   const p2End = dshift(p1End, 21);                                     // Phase 2: 3 weeks of knowledge building
                   const phaseOf = (ws) => { const we = dshift(ws, 6); if (we >= p4Start) return 4; if (we > p2End) return 3; if (we > p1End) return 2; return 1; };
                   const PHASE_META = {
-                    1: ["Finish contact hours", "LinkedIn Learning path · save each course certificate · Nov 7 full mock", (pmpSubj.weeklyTarget || 6.75) + "h study"],
+                    1: ["Boot camp = contact hours", "practice sets Nov 2–8 · Nov 7 full mock · boot camp Nov 9–12 (35 h) · get the certificate", (pmpSubj.weeklyTarget || 6.75) + "h study"],
                     2: ["Build knowledge", "one topic daily · 20–30 questions/day · build the error log", "~150 Qs"],
                     3: ["Build endurance", "40–60 questions on weekdays · one full mock every weekend", "~250 Qs · 1 mock"],
                     4: ["Final review", "weak areas · agile refresh · formulas · final mock · taper", "light + 1 mock"],
@@ -4231,7 +4253,7 @@ const { useState, useEffect, useRef } = React;
                   return (<>
                     <div style={{ ...card, marginBottom: 10, border: `1.5px solid ${C.navy}` }}>
                       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
-                        <p style={{ ...miniLabel, margin: 0 }}>LINKEDIN LEARNING PATH — {doneH.toFixed(1)} / 35 CONTACT HRS</p>
+                        <p style={{ ...miniLabel, margin: 0 }}>LINKEDIN LEARNING PATH — BACKUP · {doneH.toFixed(1)} h DONE</p>
                         {liUrl
                           ? <a href={liUrl} target="_blank" rel="noopener noreferrer" style={{ textDecoration: "none", background: C.navy, color: "#fff", borderRadius: 6, padding: "3px 8px", fontFamily: "'DM Mono', monospace", fontSize: 9.5 }}>Open path ↗</a>
                           : <span style={{ fontFamily: "'DM Mono', monospace", fontSize: 9, color: C.ember }}>add the path link under Links</span>}
@@ -4249,8 +4271,8 @@ const { useState, useEffect, useRef } = React;
                           <button key={v} onClick={() => setPmtiSpeed(v)} style={{ border: `1px solid ${pmtiSpeed === v ? C.navy : C.line}`, background: pmtiSpeed === v ? C.navy : "transparent", color: pmtiSpeed === v ? "#fff" : C.soft, borderRadius: 99, padding: "3px 9px", fontFamily: "'DM Mono', monospace", fontSize: 10, cursor: "pointer" }}>{v}×</button>
                         ))}
                       </div>
-                      <p style={{ fontFamily: "'DM Mono', monospace", fontSize: 9, color: daysLeft > 0 && perDay > 4 ? C.ember : C.faint, margin: "8px 0 0", lineHeight: 1.5 }}>
-                        {doneH >= 35 ? "35 contact hours covered — download every course certificate." : (daysLeft > 0 ? `${daysLeft}d to Sat Nov 7 · ${perDay.toFixed(1)} clock h/day at ${pmtiSpeed}×` : "Past the Nov 7 target — hours still open. Check the workbook's Course Plan before adding blocks.")}
+                      <p style={{ fontFamily: "'DM Mono', monospace", fontSize: 9, color: C.faint, margin: "8px 0 0", lineHeight: 1.5 }}>
+                        {doneH >= 35 ? "LinkedIn alone now covers 35 hours — keep every course certificate." : "Backup only: the PMTI boot camp (Nov 9–12) supplies the 35 contact hours. Use these courses for People and Business Environment gaps; no deadline."}
                       </p>
                       <p style={{ fontFamily: "'DM Mono', monospace", fontSize: 9, color: C.faint, margin: "6px 0 0", lineHeight: 1.5 }}>Path is {totalH.toFixed(1)} h including the 3 h supplement placeholder. A course counts its full listed length when marked done, same as the workbook. ASSUMPTION: the certificate shows course length, not watch time.</p>
                     </div>
